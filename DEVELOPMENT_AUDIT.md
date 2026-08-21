@@ -2,6 +2,8 @@
 
 Audit date: 2026-08-20
 
+> Status update (2026-08-21): the RBAC, organization-administration, and lead-management findings in this historical audit have been superseded. The application now provisions 15 built-in role templates and a 272-code granular permission catalog during explicit tenant onboarding; exposes audited tenant-safe organization, access-control, and complete lead-lifecycle APIs; prevents delegated privilege escalation; enforces permissions in backend dependencies; and provides permission-aware administration, lead pipeline, allocation, duplicate review, import, unattended, and ageing UI. No default/demo users, leads, sources, lost reasons, or other business records are created.
+
 ## Audit scope
 
 This audit covers all project-owned source code, configuration, migrations, documentation, and tests in the repository. Generated directories and artifacts (`backend/.venv`, `frontend/node_modules`, `frontend/.next`, Python caches, pytest/mypy/Ruff caches, and `tsconfig.tsbuildinfo`) were inventoried but are not treated as application source.
@@ -228,7 +230,7 @@ No list endpoints, pagination, filtering, sorting, search, CRUD endpoints, workf
 - Complete organization administration: branch/department APIs, user invitation/lifecycle, teams, project visibility, and all 15 configurable primary roles.
 - Role and permission management UI/API, permission catalog lifecycle, and permission-change auditing.
 - Lead sources, assignment, protection, qualification transitions, activities, loss/disqualification reasons, and customer conversion.
-- Customer 360, customer documents, KYC, consent, duplicate detection, and sensitive data controls.
+- Customer 360 profile, consent preferences, duplicate detection, linked documents, financial balance, after-sales records, and permission-filtered timeline are delivered. KYC verification and sensitive-data encryption remain future hardening work.
 - Projects, towers/blocks, floors, unit attributes, inventory import, pricing, price lists, and availability search.
 - Site visits, sales activities, quotations, cost sheets, negotiation, discount approval, and unit holds with expiry.
 - Transactional booking, documentation, verification, approval, cancellation, refunds, and unit transfer.

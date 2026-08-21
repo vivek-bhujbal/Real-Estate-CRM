@@ -1,0 +1,27 @@
+"use client";
+
+import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
+
+import { AppShell } from "@/components/app-shell";
+import { useAuth } from "@/components/auth-provider";
+import { apiRequest, ApiError, permissionGranted, SalespersonOption, SiteVisit } from "@/lib/api";
+
+function message(reason: unknown) { return reason instanceof ApiError ? reason.message : "Visit calendar is unavailable"; }
+function dateKey(value: Date) { return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`; }
+function monthRange(month: string) { const start = new Date(`${month}-01T00:00:00`); const end = new Date(start.getFullYear(), start.getMonth() + 1, 0, 23, 59, 59); return { start, end }; }
+function moveMonth(month: string, amount: number) { const date = new Date(`${month}-01T00:00:00`); date.setMonth(date.getMonth() + amount); return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`; }
+
+export default function VisitCalendarPage() {
+  const { session } = useAuth(); const permissions = useMemo(() => session?.user.permissions ?? [], [session]); const canCreate = permissionGranted(permissions, "visits.create"); const canAssign = permissionGranted(permissions, "visits.assign");
+  const [month, setMonth] = useState(""); const [visits, setVisits] = useState<SiteVisit[]>([]); const [salespeople, setSalespeople] = useState<SalespersonOption[]>([]); const [salespersonId, setSalespersonId] = useState(""); const [error, setError] = useState<string | null>(null); const [loading, setLoading] = useState(true);
+  useEffect(() => { const timer = window.setTimeout(() => { const now = new Date(); setMonth(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`); }, 0); return () => window.clearTimeout(timer); }, []);
+  useEffect(() => { if (!session || !month) return; let active = true; const { start, end } = monthRange(month); const params = new URLSearchParams({ date_from: start.toISOString(), date_to: end.toISOString() }); if (salespersonId) params.set("assigned_user_id", salespersonId); void apiRequest<SiteVisit[]>(`/site-visits/calendar?${params}`).then((data) => { if (active) setVisits(data); }).catch((reason: unknown) => { if (active) setError(message(reason)); }).finally(() => { if (active) setLoading(false); }); return () => { active = false; }; }, [month, salespersonId, session]);
+  useEffect(() => { if (!session || !canAssign) return; let active = true; void apiRequest<SalespersonOption[]>("/site-visits/salespeople").then((data) => { if (active) setSalespeople(data); }).catch(() => undefined); return () => { active = false; }; }, [canAssign, session]);
+  const cells = useMemo(() => { if (!month) return []; const { start, end } = monthRange(month); return [...Array(start.getDay()).fill(null), ...Array.from({ length: end.getDate() }, (_, index) => index + 1)]; }, [month]);
+  const grouped = useMemo(() => { const map = new Map<string, SiteVisit[]>(); for (const visit of visits) { const key = dateKey(new Date(visit.scheduled_at)); map.set(key, [...(map.get(key) ?? []), visit]); } return map; }, [visits]);
+
+  return <AppShell><main className="dashboard-content visit-content"><div className="management-heading calendar-heading"><div><p className="overline">Field schedule</p><h1>Visit calendar</h1><p>Month view of customer and lead appointments across projects.</p></div><div className="heading-actions"><Link className="button button-secondary" href="/site-visits">List view</Link>{canCreate && <Link className="button button-primary" href="/site-visits/create">Schedule visit</Link>}</div></div>{error && <div className="alert alert-error page-alert">{error}</div>}
+    <section className="calendar-card"><header><div><button disabled={!month} onClick={() => setMonth((value) => moveMonth(value, -1))}>←</button><h2>{month ? new Date(`${month}-01T00:00:00`).toLocaleDateString("en-IN", { month: "long", year: "numeric" }) : "Calendar"}</h2><button disabled={!month} onClick={() => setMonth((value) => moveMonth(value, 1))}>→</button></div>{canAssign && <select value={salespersonId} onChange={(e) => setSalespersonId(e.target.value)}><option value="">All salespeople</option>{salespeople.map((item) => <option value={item.id} key={item.id}>{item.full_name}</option>)}</select>}</header><div className="calendar-weekdays">{["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day) => <span key={day}>{day}</span>)}</div><div className="calendar-grid">{cells.map((day, index) => { const key = day && month ? `${month}-${String(day).padStart(2, "0")}` : ""; const dayVisits = key ? grouped.get(key) ?? [] : []; return <div className={!day ? "calendar-empty-cell" : "calendar-day"} key={`${index}-${day ?? "blank"}`}>{day && <><strong>{day}</strong><div>{dayVisits.slice(0, 3).map((visit) => <Link key={visit.id} href={`/site-visits/${visit.id}`} className={`calendar-event event-${visit.status.toLowerCase()}`}><time>{new Date(visit.scheduled_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}</time><span>{visit.customer_name ?? visit.lead_name}</span><small>{visit.project_name}</small></Link>)}{dayVisits.length > 3 && <small className="calendar-more">+{dayVisits.length - 3} more</small>}</div></>}</div>; })}</div>{loading && <div className="calendar-loading"><span className="spinner" />Loading schedule...</div>}</section>
+  </main></AppShell>;
+}

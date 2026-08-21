@@ -13,7 +13,7 @@ router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
 @router.get("/summary", response_model=DashboardSummary)
 async def summary(
     db: DbSession,
-    user: Annotated[User, Depends(require_permission("dashboard.read"))],
+    user: Annotated[User, Depends(require_permission("dashboard.view"))],
 ) -> DashboardSummary:
     organization_id = user.organization_id
 

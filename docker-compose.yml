@@ -60,6 +60,29 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/live')"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
+  unit-hold-expiry-worker:
+    build:
+      context: ./backend
+      target: runtime
+    restart: unless-stopped
+    command: ["python", "-m", "app.workers.unit_hold_expiry"]
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: mysql+asyncmy://${MYSQL_USER:-crm_app}:${MYSQL_PASSWORD}@mysql:3306/${MYSQL_DATABASE:-realestate_crm}
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:?Set JWT_SECRET_KEY in .env}
+      UNIT_HOLD_EXPIRY_INTERVAL_SECONDS: ${UNIT_HOLD_EXPIRY_INTERVAL_SECONDS:-30}
+    depends_on:
+      backend:
+        condition: service_healthy
 
   frontend:
     build:

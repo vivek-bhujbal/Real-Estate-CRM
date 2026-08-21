@@ -28,6 +28,8 @@ class RecordStatus(StrEnum):
 
 class DocumentStatus(StrEnum):
     PENDING = "PENDING"
+    UPLOADED = "UPLOADED"
+    UNDER_REVIEW = "UNDER_REVIEW"
     VERIFIED = "VERIFIED"
     REJECTED = "REJECTED"
     EXPIRED = "EXPIRED"
@@ -58,20 +60,27 @@ class UnitStatus(StrEnum):
     BOOKING_INITIATED = "BOOKING_INITIATED"
     BOOKED = "BOOKED"
     SOLD = "SOLD"
-    LEASED = "LEASED"
-    BLOCKED = "BLOCKED"
+    CANCELLED_RELEASED = "CANCELLED_RELEASED"
 
 
 class HoldStatus(StrEnum):
+    PENDING_APPROVAL = "PENDING_APPROVAL"
     ACTIVE = "ACTIVE"
+    REJECTED = "REJECTED"
     RELEASED = "RELEASED"
     EXPIRED = "EXPIRED"
     CONVERTED = "CONVERTED"
 
 
+class HoldType(StrEnum):
+    SOFT_HOLD = "SOFT_HOLD"
+    HARD_HOLD = "HARD_HOLD"
+
+
 class VisitStatus(StrEnum):
     SCHEDULED = "SCHEDULED"
     CONFIRMED = "CONFIRMED"
+    CHECKED_IN = "CHECKED_IN"
     COMPLETED = "COMPLETED"
     CANCELLED = "CANCELLED"
     NO_SHOW = "NO_SHOW"
@@ -86,6 +95,15 @@ class QuotationStatus(StrEnum):
     SUPERSEDED = "SUPERSEDED"
 
 
+class CostSheetStatus(StrEnum):
+    DRAFT = "DRAFT"
+    PENDING_APPROVAL = "PENDING_APPROVAL"
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
+    CONVERTED = "CONVERTED"
+    VOIDED = "VOIDED"
+
+
 class BookingStatus(StrEnum):
     DRAFT = "DRAFT"
     DOCUMENTATION_PENDING = "DOCUMENTATION_PENDING"
@@ -94,7 +112,17 @@ class BookingStatus(StrEnum):
     VERIFICATION = "VERIFICATION"
     APPROVAL = "APPROVAL"
     CONFIRMED = "CONFIRMED"
+    REJECTED = "REJECTED"
     CANCELLED = "CANCELLED"
+
+
+class FinancingStatus(StrEnum):
+    NOT_REQUIRED = "NOT_REQUIRED"
+    APPLIED = "APPLIED"
+    UNDER_REVIEW = "UNDER_REVIEW"
+    SANCTIONED = "SANCTIONED"
+    REJECTED = "REJECTED"
+    DISBURSED = "DISBURSED"
 
 
 class ApprovalStatus(StrEnum):
@@ -136,6 +164,25 @@ class LedgerEntryType(StrEnum):
     ADJUSTMENT = "ADJUSTMENT"
 
 
+class ReconciliationStatus(StrEnum):
+    PENDING = "PENDING"
+    MATCHED = "MATCHED"
+    MISMATCHED = "MISMATCHED"
+    RESOLVED = "RESOLVED"
+
+
+class FinancialChargeType(StrEnum):
+    PENALTY = "PENALTY"
+    INTEREST = "INTEREST"
+
+
+class FinancialChargeStatus(StrEnum):
+    APPLIED = "APPLIED"
+    PARTIALLY_PAID = "PARTIALLY_PAID"
+    PAID = "PAID"
+    WAIVED = "WAIVED"
+
+
 class WorkflowStatus(StrEnum):
     REQUESTED = "REQUESTED"
     UNDER_REVIEW = "UNDER_REVIEW"
@@ -147,7 +194,13 @@ class WorkflowStatus(StrEnum):
 
 class PartnerStatus(StrEnum):
     PENDING = "PENDING"
+    APPLICATION = "APPLICATION"
+    DOCUMENT_VERIFICATION = "DOCUMENT_VERIFICATION"
+    AGREEMENT_PENDING = "AGREEMENT_PENDING"
+    APPROVAL_PENDING = "APPROVAL_PENDING"
+    APPROVED = "APPROVED"
     ACTIVE = "ACTIVE"
+    REJECTED = "REJECTED"
     SUSPENDED = "SUSPENDED"
     INACTIVE = "INACTIVE"
 
@@ -172,6 +225,27 @@ class PossessionStatus(StrEnum):
     SCHEDULED = "SCHEDULED"
     COMPLETED = "COMPLETED"
     DEFERRED = "DEFERRED"
+
+
+class PostBookingStage(StrEnum):
+    AGREEMENT_PENDING = "AGREEMENT_PENDING"
+    CONSTRUCTION = "CONSTRUCTION"
+    POSSESSION_READINESS = "POSSESSION_READINESS"
+    FINAL_DEMAND = "FINAL_DEMAND"
+    FINAL_PAYMENT = "FINAL_PAYMENT"
+    NO_DUES = "NO_DUES"
+    SNAGGING = "SNAGGING"
+    POSSESSION = "POSSESSION"
+    HANDOVER = "HANDOVER"
+    COMPLETED = "COMPLETED"
+
+
+class SnagStatus(StrEnum):
+    OPEN = "OPEN"
+    IN_PROGRESS = "IN_PROGRESS"
+    RESOLVED = "RESOLVED"
+    ACCEPTED = "ACCEPTED"
+    WAIVED = "WAIVED"
 
 
 class TenantStatus(StrEnum):

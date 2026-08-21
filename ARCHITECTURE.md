@@ -363,13 +363,13 @@ RBAC controls what a user may do; data scope controls where they may do it. Both
 
 ### Core concepts
 
-- **Permission:** stable technical code such as `users.read` or `bookings.approve`.
+- **Permission:** stable technical code such as `users.view` or `bookings.approve`.
 - **Role:** organization-configurable set of permissions.
 - **Assignment:** association of a user to a role and optional scope.
 - **Scope:** organization, branch, department, project, team, assigned-user, or self.
 - **Resource policy:** module-specific ownership/status rule evaluated after permission and scope.
 
-The 15 primary product roles are configurable templates, not hardcoded authorization branches. An organization may adopt and customize templates through an explicit onboarding/administrative action. The system does not create demo users or business records.
+The 15 primary product roles are configurable templates, not hardcoded authorization branches. They are provisioned as technical access metadata during explicit organization onboarding. Only the Organization Administrator template is protected from permission changes; other built-in templates can be configured without renaming or deleting them. The system does not create demo users or business records.
 
 ### Evaluation contract
 

@@ -1,0 +1,5 @@
+import { ProtectedRoute } from "@/components/protected-route";
+
+export default function Layout({ children }: { children: React.ReactNode }) {
+  return <ProtectedRoute permission="quotations.approve">{children}</ProtectedRoute>;
+}

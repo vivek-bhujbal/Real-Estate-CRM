@@ -2,6 +2,7 @@ from datetime import date, datetime
 from decimal import Decimal
 
 from sqlalchemy import (
+    JSON,
     CheckConstraint,
     Date,
     DateTime,
@@ -17,9 +18,12 @@ from app.db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 from app.models.common import OrganizationOwnedMixin, status_enum, tenant_fk, tenant_unique
 from app.models.enums import (
     AgreementStatus,
+    FinancialChargeStatus,
+    FinancialChargeType,
     InstallmentStatus,
     LedgerEntryType,
     PaymentStatus,
+    ReconciliationStatus,
     RecordStatus,
     WorkflowStatus,
 )
@@ -30,11 +34,17 @@ class Agreement(OrganizationOwnedMixin, UUIDPrimaryKeyMixin, TimestampMixin, Bas
     __table_args__ = (
         tenant_unique(__tablename__),
         tenant_fk(__tablename__, "booking_id", "bookings"),
+        tenant_fk(__tablename__, "issued_by_user_id", "users"),
+        tenant_fk(__tablename__, "signed_by_user_id", "users"),
+        tenant_fk(__tablename__, "registered_by_user_id", "users"),
         UniqueConstraint("organization_id", "booking_id", name="uq_agreements_tenant_booking"),
         UniqueConstraint("organization_id", "agreement_number", name="uq_agreements_tenant_number"),
     )
 
     booking_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    issued_by_user_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    signed_by_user_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    registered_by_user_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     agreement_number: Mapped[str] = mapped_column(String(60), nullable=False)
     status: Mapped[AgreementStatus] = mapped_column(
         status_enum(AgreementStatus, "agreement_status"),
@@ -45,6 +55,12 @@ class Agreement(OrganizationOwnedMixin, UUIDPrimaryKeyMixin, TimestampMixin, Bas
     signed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     registered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     storage_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    file_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    content_type: Mapped[str | None] = mapped_column(String(127), nullable=True)
+    size_bytes: Mapped[int | None] = mapped_column(nullable=True)
+    checksum_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    registration_number: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class PaymentPlan(OrganizationOwnedMixin, UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -126,6 +142,7 @@ class DemandLetter(OrganizationOwnedMixin, UUIDPrimaryKeyMixin, TimestampMixin, 
     amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
     currency: Mapped[str] = mapped_column(String(3), nullable=False)
     storage_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    is_final: Mapped[bool] = mapped_column(default=False, nullable=False)
 
 
 class Payment(OrganizationOwnedMixin, UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -182,6 +199,102 @@ class Receipt(OrganizationOwnedMixin, UUIDPrimaryKeyMixin, TimestampMixin, Base)
     storage_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
 
 
+class PaymentAllocation(OrganizationOwnedMixin, UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "payment_allocations"
+    __table_args__ = (
+        tenant_unique(__tablename__),
+        tenant_fk(__tablename__, "payment_id", "payments", ondelete="CASCADE"),
+        tenant_fk(__tablename__, "installment_id", "installments"),
+        tenant_fk(__tablename__, "demand_letter_id", "demand_letters"),
+        tenant_fk(__tablename__, "allocated_by_user_id", "users"),
+        CheckConstraint("amount > 0", name="amount_positive"),
+        UniqueConstraint(
+            "organization_id", "idempotency_key", name="uq_payment_allocations_idempotency"
+        ),
+        Index("ix_payment_allocations_payment", "organization_id", "payment_id"),
+    )
+
+    payment_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    installment_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    demand_letter_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    allocated_by_user_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(100), nullable=False)
+    allocated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    reversed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class PaymentReconciliation(OrganizationOwnedMixin, UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "payment_reconciliations"
+    __table_args__ = (
+        tenant_unique(__tablename__),
+        tenant_fk(__tablename__, "payment_id", "payments", ondelete="CASCADE"),
+        tenant_fk(__tablename__, "reconciled_by_user_id", "users"),
+        UniqueConstraint(
+            "organization_id", "idempotency_key", name="uq_payment_reconciliations_idempotency"
+        ),
+        CheckConstraint("expected_amount > 0 AND received_amount >= 0", name="amounts_valid"),
+        Index("ix_payment_reconciliations_status", "organization_id", "status"),
+    )
+
+    payment_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    reconciled_by_user_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    status: Mapped[ReconciliationStatus] = mapped_column(
+        status_enum(ReconciliationStatus, "payment_reconciliation_status"), nullable=False
+    )
+    expected_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
+    received_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
+    difference_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
+    external_reference: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    idempotency_key: Mapped[str] = mapped_column(String(100), nullable=False)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reconciled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class FinancialCharge(OrganizationOwnedMixin, UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "financial_charges"
+    __table_args__ = (
+        tenant_unique(__tablename__),
+        tenant_fk(__tablename__, "booking_id", "bookings"),
+        tenant_fk(__tablename__, "customer_id", "customers"),
+        tenant_fk(__tablename__, "installment_id", "installments"),
+        tenant_fk(__tablename__, "created_by_user_id", "users"),
+        tenant_fk(__tablename__, "waived_by_user_id", "users"),
+        CheckConstraint(
+            "principal_amount >= 0 AND rate_percent >= 0 AND days_calculated >= 0 "
+            "AND amount > 0 AND paid_amount >= 0",
+            name="amounts_valid",
+        ),
+        UniqueConstraint(
+            "organization_id", "idempotency_key", name="uq_financial_charges_idempotency"
+        ),
+        Index("ix_financial_charges_booking_status", "organization_id", "booking_id", "status"),
+    )
+
+    booking_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    customer_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    installment_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    created_by_user_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    waived_by_user_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    charge_type: Mapped[FinancialChargeType] = mapped_column(
+        status_enum(FinancialChargeType, "financial_charge_type"), nullable=False
+    )
+    status: Mapped[FinancialChargeStatus] = mapped_column(
+        status_enum(FinancialChargeStatus, "financial_charge_status"), nullable=False
+    )
+    principal_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
+    rate_percent: Mapped[Decimal] = mapped_column(Numeric(8, 4), default=0, nullable=False)
+    days_calculated: Mapped[int] = mapped_column(default=0, nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
+    paid_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=0, nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    calculation_date: Mapped[date] = mapped_column(Date, nullable=False)
+    reason: Mapped[str] = mapped_column(String(500), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(100), nullable=False)
+    waived_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    waived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class CustomerLedger(OrganizationOwnedMixin, UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "customer_ledger_entries"
     __table_args__ = (
@@ -222,13 +335,21 @@ class Cancellation(OrganizationOwnedMixin, UUIDPrimaryKeyMixin, TimestampMixin, 
         tenant_unique(__tablename__),
         tenant_fk(__tablename__, "booking_id", "bookings"),
         tenant_fk(__tablename__, "requested_by_user_id", "users"),
+        tenant_fk(__tablename__, "reviewed_by_user_id", "users"),
         tenant_fk(__tablename__, "approved_by_user_id", "users"),
-        UniqueConstraint("organization_id", "booking_id", name="uq_cancellations_tenant_booking"),
+        UniqueConstraint(
+            "organization_id", "active_booking_key", name="uq_cancellations_tenant_active_booking"
+        ),
+        CheckConstraint(
+            "paid_amount_snapshot >= 0 AND deduction_amount >= 0 AND refund_amount >= 0",
+            name="amounts_nonnegative",
+        ),
         Index("ix_cancellations_tenant_status", "organization_id", "status"),
     )
 
     booking_id: Mapped[str] = mapped_column(String(36), nullable=False)
     requested_by_user_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    reviewed_by_user_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     approved_by_user_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     status: Mapped[WorkflowStatus] = mapped_column(
         status_enum(WorkflowStatus, "cancellation_status"),
@@ -236,8 +357,24 @@ class Cancellation(OrganizationOwnedMixin, UUIDPrimaryKeyMixin, TimestampMixin, 
         nullable=False,
     )
     reason: Mapped[str] = mapped_column(Text, nullable=False)
+    review_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    decision_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    active_booking_key: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    paid_amount_snapshot: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=0, nullable=False)
+    deduction_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=0, nullable=False)
+    refund_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=0, nullable=False)
+    calculation_snapshot: Mapped[dict[str, object] | None] = mapped_column(JSON, nullable=True)
+    document_number: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    document_storage_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
     requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    unit_released_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    document_generated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
@@ -246,15 +383,22 @@ class Refund(OrganizationOwnedMixin, UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __table_args__ = (
         tenant_unique(__tablename__),
         tenant_fk(__tablename__, "cancellation_id", "cancellations"),
+        tenant_fk(__tablename__, "booking_id", "bookings"),
         tenant_fk(__tablename__, "payment_id", "payments"),
         tenant_fk(__tablename__, "customer_id", "customers"),
+        tenant_fk(__tablename__, "requested_by_user_id", "users"),
+        tenant_fk(__tablename__, "approved_by_user_id", "users"),
+        UniqueConstraint("organization_id", "idempotency_key", name="uq_refunds_idempotency"),
         CheckConstraint("amount > 0", name="amount_positive"),
         Index("ix_refunds_tenant_status", "organization_id", "status"),
     )
 
-    cancellation_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    cancellation_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    booking_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     payment_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     customer_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    requested_by_user_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    approved_by_user_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     status: Mapped[PaymentStatus] = mapped_column(
         status_enum(PaymentStatus, "refund_status"),
         default=PaymentStatus.PENDING,
@@ -263,7 +407,12 @@ class Refund(OrganizationOwnedMixin, UUIDPrimaryKeyMixin, TimestampMixin, Base):
     amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
     currency: Mapped[str] = mapped_column(String(3), nullable=False)
     reference_number: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    decision_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    idempotency_key: Mapped[str | None] = mapped_column(String(100), nullable=True)
     requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    rejected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
@@ -274,16 +423,26 @@ class UnitTransfer(OrganizationOwnedMixin, UUIDPrimaryKeyMixin, TimestampMixin, 
         tenant_fk(__tablename__, "booking_id", "bookings"),
         tenant_fk(__tablename__, "from_unit_id", "units"),
         tenant_fk(__tablename__, "to_unit_id", "units"),
+        tenant_fk(__tablename__, "quotation_id", "quotations"),
         tenant_fk(__tablename__, "requested_by_user_id", "users"),
+        tenant_fk(__tablename__, "reviewed_by_user_id", "users"),
         tenant_fk(__tablename__, "approved_by_user_id", "users"),
         CheckConstraint("from_unit_id <> to_unit_id", name="units_different"),
+        CheckConstraint(
+            "old_agreed_price >= 0 AND new_agreed_price >= 0", name="prices_nonnegative"
+        ),
+        UniqueConstraint(
+            "organization_id", "active_booking_key", name="uq_unit_transfers_tenant_active_booking"
+        ),
         Index("ix_unit_transfers_tenant_booking_status", "organization_id", "booking_id", "status"),
     )
 
     booking_id: Mapped[str] = mapped_column(String(36), nullable=False)
     from_unit_id: Mapped[str] = mapped_column(String(36), nullable=False)
     to_unit_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    quotation_id: Mapped[str] = mapped_column(String(36), nullable=False)
     requested_by_user_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    reviewed_by_user_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     approved_by_user_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     status: Mapped[WorkflowStatus] = mapped_column(
         status_enum(WorkflowStatus, "unit_transfer_status"),
@@ -291,6 +450,22 @@ class UnitTransfer(OrganizationOwnedMixin, UUIDPrimaryKeyMixin, TimestampMixin, 
         nullable=False,
     )
     reason: Mapped[str] = mapped_column(Text, nullable=False)
+    review_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    decision_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    active_booking_key: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    old_agreed_price: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
+    new_agreed_price: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
+    price_difference: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
+    paid_amount_snapshot: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=0, nullable=False)
+    pricing_snapshot: Mapped[dict[str, object] | None] = mapped_column(JSON, nullable=True)
+    payment_plan_snapshot: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    commission_snapshot: Mapped[dict[str, object] | None] = mapped_column(JSON, nullable=True)
+    document_number: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    document_storage_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
     requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    document_generated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

@@ -17,7 +17,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 from app.models.common import OrganizationOwnedMixin, status_enum, tenant_fk, tenant_unique
-from app.models.enums import HoldStatus, ProjectStatus, RecordStatus, UnitStatus
+from app.models.enums import HoldStatus, HoldType, ProjectStatus, RecordStatus, UnitStatus
 
 
 class Project(OrganizationOwnedMixin, UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -31,6 +31,19 @@ class Project(OrganizationOwnedMixin, UUIDPrimaryKeyMixin, TimestampMixin, Base)
     name: Mapped[str] = mapped_column(String(180), nullable=False)
     code: Mapped[str] = mapped_column(String(50), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    project_type: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    address_line1: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    address_line2: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    city: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    state: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    postal_code: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    country: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    rera_number: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    launch_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    expected_possession_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    default_currency: Mapped[str] = mapped_column(String(3), default="INR", nullable=False)
+    amenities: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    configuration: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     status: Mapped[ProjectStatus] = mapped_column(
         status_enum(ProjectStatus, "project_status"),
         default=ProjectStatus.PLANNING,
@@ -85,6 +98,17 @@ class Unit(OrganizationOwnedMixin, UUIDPrimaryKeyMixin, TimestampMixin, Base):
         ),
         CheckConstraint("base_price IS NULL OR base_price >= 0", name="base_price_nonnegative"),
         CheckConstraint("area_sqft IS NULL OR area_sqft > 0", name="area_sqft_positive"),
+        CheckConstraint(
+            "carpet_area_sqft IS NULL OR carpet_area_sqft > 0",
+            name="carpet_area_sqft_positive",
+        ),
+        CheckConstraint(
+            "built_up_area_sqft IS NULL OR built_up_area_sqft > 0",
+            name="built_up_area_sqft_positive",
+        ),
+        CheckConstraint("bedrooms IS NULL OR bedrooms >= 0", name="bedrooms_nonnegative"),
+        CheckConstraint("bathrooms IS NULL OR bathrooms >= 0", name="bathrooms_nonnegative"),
+        CheckConstraint("balconies IS NULL OR balconies >= 0", name="balconies_nonnegative"),
         Index("ix_units_tenant_status", "organization_id", "status"),
         Index("ix_units_tenant_tower_floor", "organization_id", "tower_id", "floor_id"),
     )
@@ -95,6 +119,15 @@ class Unit(OrganizationOwnedMixin, UUIDPrimaryKeyMixin, TimestampMixin, Base):
     unit_number: Mapped[str] = mapped_column(String(50), nullable=False)
     unit_type: Mapped[str | None] = mapped_column(String(80), nullable=True)
     area_sqft: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
+    carpet_area_sqft: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
+    built_up_area_sqft: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
+    facing: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    bedrooms: Mapped[int | None] = mapped_column(nullable=True)
+    bathrooms: Mapped[int | None] = mapped_column(nullable=True)
+    balconies: Mapped[int | None] = mapped_column(nullable=True)
+    amenities: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    price_components: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    configuration: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     status: Mapped[UnitStatus] = mapped_column(
         status_enum(UnitStatus, "unit_status"), default=UnitStatus.AVAILABLE, nullable=False
     )
@@ -110,6 +143,7 @@ class UnitHold(OrganizationOwnedMixin, UUIDPrimaryKeyMixin, TimestampMixin, Base
         tenant_fk(__tablename__, "customer_id", "customers"),
         tenant_fk(__tablename__, "lead_id", "leads"),
         tenant_fk(__tablename__, "held_by_user_id", "users"),
+        tenant_fk(__tablename__, "approved_by_user_id", "users"),
         UniqueConstraint(
             "organization_id", "active_unit_key", name="uq_unit_holds_tenant_active_unit"
         ),
@@ -120,12 +154,20 @@ class UnitHold(OrganizationOwnedMixin, UUIDPrimaryKeyMixin, TimestampMixin, Base
     customer_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     lead_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     held_by_user_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    approved_by_user_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    hold_type: Mapped[HoldType | None] = mapped_column(
+        status_enum(HoldType, "unit_hold_type"), nullable=True
+    )
+    hold_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[HoldStatus] = mapped_column(
         status_enum(HoldStatus, "unit_hold_status"), default=HoldStatus.ACTIVE, nullable=False
     )
     starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     released_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    rejected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    approval_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     release_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
     active_unit_key: Mapped[str | None] = mapped_column(String(36), nullable=True)
 

@@ -27,7 +27,7 @@ async def test_organization_onboarding_and_empty_dashboard(client: AsyncClient) 
     assert registered.status_code == 201, registered.text
     body = registered.json()
     assert body["user"]["organization"]["slug"] == "northstar-realty"
-    assert "dashboard.read" in body["user"]["permissions"]
+    assert "dashboard.view" in body["user"]["permissions"]
     assert "refresh_token" not in body
     assert client.cookies.get("refresh_token")
 

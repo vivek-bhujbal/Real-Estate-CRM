@@ -12,6 +12,12 @@ class Organization(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     name: Mapped[str] = mapped_column(String(160), nullable=False)
     slug: Mapped[str] = mapped_column(String(80), nullable=False, unique=True, index=True)
+    legal_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    contact_email: Mapped[str | None] = mapped_column(String(254), nullable=True)
+    contact_phone: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    timezone: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    currency: Mapped[str | None] = mapped_column(String(3), nullable=True)
+    date_format: Mapped[str | None] = mapped_column(String(24), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
     users: Mapped[list["User"]] = relationship(back_populates="organization")
@@ -41,6 +47,58 @@ class Department(OrganizationOwnedMixin, UUIDPrimaryKeyMixin, TimestampMixin, Ba
 
     branch_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
     name: Mapped[str] = mapped_column(String(120), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+
+class Team(OrganizationOwnedMixin, UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "teams"
+    __table_args__ = (
+        tenant_unique(__tablename__),
+        tenant_fk(__tablename__, "branch_id", "branches"),
+        tenant_fk(__tablename__, "manager_user_id", "users"),
+        UniqueConstraint("organization_id", "code", name="uq_teams_organization_id_code"),
+    )
+
+    branch_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    manager_user_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    name: Mapped[str] = mapped_column(String(160), nullable=False)
+    code: Mapped[str] = mapped_column(String(40), nullable=False)
+    description: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+
+class TeamMember(OrganizationOwnedMixin, UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "team_members"
+    __table_args__ = (
+        tenant_unique(__tablename__),
+        tenant_fk(__tablename__, "team_id", "teams", ondelete="CASCADE"),
+        tenant_fk(__tablename__, "user_id", "users", ondelete="CASCADE"),
+        UniqueConstraint(
+            "organization_id", "team_id", "user_id", name="uq_team_members_tenant_team_user"
+        ),
+        Index("ix_team_members_tenant_user", "organization_id", "user_id"),
+    )
+
+    team_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    user_id: Mapped[str] = mapped_column(String(36), nullable=False)
+
+
+class Territory(OrganizationOwnedMixin, UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "territories"
+    __table_args__ = (
+        tenant_unique(__tablename__),
+        tenant_fk(__tablename__, "branch_id", "branches"),
+        tenant_fk(__tablename__, "parent_id", "territories"),
+        tenant_fk(__tablename__, "manager_user_id", "users"),
+        UniqueConstraint("organization_id", "code", name="uq_territories_organization_id_code"),
+    )
+
+    branch_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    parent_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    manager_user_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    name: Mapped[str] = mapped_column(String(160), nullable=False)
+    code: Mapped[str] = mapped_column(String(40), nullable=False)
+    description: Mapped[str | None] = mapped_column(String(500), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
 

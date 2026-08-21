@@ -1,10 +1,11 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import { AppShell } from "@/components/app-shell";
 import { useAuth } from "@/components/auth-provider";
-import { apiRequest, ApiError } from "@/lib/api";
+import { apiRequest, ApiError, permissionGranted } from "@/lib/api";
 
 type Summary = { leads: number; projects: number; available_units: number; bookings: number };
 
@@ -19,6 +20,7 @@ export default function DashboardPage() {
   const { session } = useAuth();
   const [summary, setSummary] = useState<Summary | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const canCreateLead = permissionGranted(session?.user.permissions ?? [], "leads.create");
 
   useEffect(() => {
     if (!session) return;
@@ -38,7 +40,7 @@ export default function DashboardPage() {
       <main className="dashboard-content">
         <div className="page-heading">
           <div><p className="overline">Workspace overview</p><h1>Good to see you, {session.user.full_name.split(" ")[0]}</h1><p>Here is the current picture from your organization’s records.</p></div>
-          <button className="button button-primary" disabled title="Lead creation arrives in the lead-management phase">Add lead</button>
+          {canCreateLead && <Link className="button button-primary" href="/leads/create">Add lead</Link>}
         </div>
 
         {error && <div className="alert alert-error" role="alert">{error}</div>}
@@ -57,7 +59,7 @@ export default function DashboardPage() {
           <article className="panel pipeline-panel">
             <div className="panel-heading"><div><h2>Sales pipeline</h2><p>Lead movement will appear as your team begins working.</p></div><span className="status-pill">Live data</span></div>
             {summary && summary.leads === 0 ? (
-              <div className="empty-state compact"><span className="empty-icon" aria-hidden="true">↗</span><h3>No leads yet</h3><p>Add your first lead in the lead-management phase to start tracking qualification and conversion.</p></div>
+              <div className="empty-state compact"><span className="empty-icon" aria-hidden="true">↗</span><h3>No leads yet</h3><p>Create your first genuine lead to start tracking qualification and conversion.</p></div>
             ) : !summary ? <div className="panel-skeleton"><span className="skeleton"/><span className="skeleton"/><span className="skeleton"/></div> : null}
           </article>
 

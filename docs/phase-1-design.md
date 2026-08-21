@@ -8,7 +8,11 @@ The dashboard reads counts from tenant-owned tables. Phase 1 creates future-faci
 
 ## Permissions
 
-Phase 1 defines stable permission codes: `dashboard.read`, `organization.read`, `organization.manage`, `users.read`, `users.manage`, `roles.read`, `roles.manage`, and `audit.read`. During organization onboarding, the administrator role and its explicit permissions are created inside the same transaction. This is user-requested tenant setup, not startup seed data. The remaining primary roles are not fabricated; administrators will create them when role management is delivered.
+The authorization catalog defines eight actions (`view`, `create`, `update`, `delete`, `approve`, `assign`, `export`, and `manage`) for every supported module. Permission codes use the stable `module.action` form. `manage` implies the other actions only inside the same module; it is not a cross-module bypass.
+
+During organization onboarding, all 15 product role templates and the tenant permission catalog are created as technical authorization metadata in the same transaction. Only the user-requested initial administrator is assigned a role. No users, leads, customers, projects, transactions, or other demo/business records are seeded. Built-in role names cannot be changed or deleted. Their permissions remain configurable except for the protected Organization Administrator role. Custom roles are supported.
+
+Role creation, editing, and assignment are tenant-scoped, audited, and protected by separate backend permissions. A delegated administrator cannot grant a permission they do not personally hold. A user cannot change their own assignments, and authorization changes increment the target user's authentication version.
 
 ## Endpoints
 
@@ -16,6 +20,9 @@ Phase 1 defines stable permission codes: `dashboard.read`, `organization.read`, 
 - `POST /api/v1/auth/login`, `/refresh`, and `/logout` manage an access/rotating-refresh session.
 - `GET /api/v1/auth/me` returns the current user and effective permissions.
 - `GET /api/v1/dashboard/summary` returns real organization-scoped counts.
+- `GET /api/v1/rbac/permissions`, `/roles`, and `/users` return the tenant access catalog.
+- `POST/PATCH/DELETE /api/v1/rbac/roles` manage authorized custom or configurable roles.
+- `PUT /api/v1/rbac/users/{user_id}/roles` atomically replaces a user's assignments.
 - `GET /health/live` and `/health/ready` expose process and dependency health.
 
 ## Workflows, validation, and edge cases

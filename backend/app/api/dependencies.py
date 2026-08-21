@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.authorization import permission_is_granted
 from app.core.errors import AppError
 from app.core.security import decode_access_token
 from app.db.session import get_db
@@ -91,6 +92,9 @@ class SecurityContext:
     def organization_id(self) -> str:
         return self.user.organization_id
 
+    def has_permission(self, permission: str) -> bool:
+        return permission_is_granted(self.permissions, permission)
+
 
 async def get_security_context(db: DbSession, user: CurrentUser) -> SecurityContext:
     return SecurityContext(user=user, permissions=frozenset(await permission_codes(db, user)))
@@ -103,7 +107,7 @@ def require_permission(
     permission: str,
 ) -> Callable[[DbSession, CurrentUser], Coroutine[Any, Any, User]]:
     async def dependency(db: DbSession, user: CurrentUser) -> User:
-        if permission not in await permission_codes(db, user):
+        if not permission_is_granted(set(await permission_codes(db, user)), permission):
             raise AppError(
                 status_code=403,
                 code="PERMISSION_DENIED",
@@ -121,7 +125,7 @@ def require_permissions(
         raise ValueError("At least one permission is required")
 
     async def dependency(context: CurrentSecurityContext) -> SecurityContext:
-        matches = [permission in context.permissions for permission in required]
+        matches = [context.has_permission(permission) for permission in required]
         allowed = any(matches) if any_of else all(matches)
         if not allowed:
             raise AppError(

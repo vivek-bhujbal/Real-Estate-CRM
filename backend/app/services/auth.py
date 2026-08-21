@@ -7,6 +7,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.authorization import PERMISSION_CATALOG, ROLE_TEMPLATES
 from app.core.config import get_settings
 from app.core.errors import AppError
 from app.core.security import (
@@ -39,17 +40,6 @@ from app.schemas.auth import (
     PasswordChangeRequest,
     ResetPasswordRequest,
 )
-
-ADMIN_PERMISSIONS = {
-    "dashboard.read": "View organization dashboards",
-    "organization.read": "View organization settings",
-    "organization.manage": "Manage organization settings",
-    "users.read": "View organization users",
-    "users.manage": "Manage organization users",
-    "roles.read": "View roles and permissions",
-    "roles.manage": "Manage roles and permissions",
-    "audit.read": "View organization audit logs",
-}
 
 
 @dataclass(slots=True)
@@ -135,27 +125,42 @@ async def register_organization(
         full_name=payload.admin_full_name,
         password_hash=hash_password(payload.password),
     )
-    role = Role(
-        organization_id=organization.id,
-        name="Organization Administrator",
-        description="Initial organization administrator",
-        is_system=True,
-    )
-    db.add_all([user, role])
+    permissions = [
+        Permission(organization_id=organization.id, code=code, description=description)
+        for code, description in PERMISSION_CATALOG.items()
+    ]
+    roles = [
+        Role(
+            organization_id=organization.id,
+            name=template.name,
+            description=template.description,
+            is_system=True,
+        )
+        for template in ROLE_TEMPLATES
+    ]
+    db.add_all([user, *permissions, *roles])
     await db.flush()
-    db.add(UserRole(organization_id=organization.id, user_id=user.id, role_id=role.id))
-
-    for code, description in ADMIN_PERMISSIONS.items():
-        permission = Permission(organization_id=organization.id, code=code, description=description)
-        db.add(permission)
-        await db.flush()
-        db.add(
+    permission_by_code = {permission.code: permission for permission in permissions}
+    role_by_name = {role.name: role for role in roles}
+    administrator_role = role_by_name["Organization Administrator"]
+    db.add(
+        UserRole(
+            organization_id=organization.id,
+            user_id=user.id,
+            role_id=administrator_role.id,
+        )
+    )
+    db.add_all(
+        [
             RolePermission(
                 organization_id=organization.id,
-                role_id=role.id,
-                permission_id=permission.id,
+                role_id=role_by_name[template.name].id,
+                permission_id=permission_by_code[code].id,
             )
-        )
+            for template in ROLE_TEMPLATES
+            for code in template.permissions
+        ]
+    )
     db.add(
         AuditLog(
             organization_id=organization.id,

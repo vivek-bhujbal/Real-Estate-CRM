@@ -2,9 +2,10 @@
 
 ## Scope
 
-This document describes the production database foundation implemented by Alembic revision
-`20260821_0001`. The schema contains structure only: migrations insert no organizations, users,
-roles, permissions, business records, or demo data.
+This document describes the production database foundation implemented by the Alembic revision
+chain through `20260821_0010`. Migrations contain schema changes and safe lifecycle-status
+normalization only; they insert no organizations, users, business records, or demo data. Role and
+permission metadata is provisioned only inside an explicit organization-onboarding transaction.
 
 The logical entity name `CustomerLedger` is stored as `customer_ledger_entries`, and `Maintenance`
 is stored as `maintenance_records`. `UserRole` and `RefreshToken` are authentication support
@@ -45,11 +46,20 @@ erDiagram
     USER ||--o{ REFRESH_TOKEN : owns
     USER ||--o{ PASSWORD_RESET_TOKEN : recovery_tokens
     USER o|--o{ AUDIT_LOG : acts_in
+    ORGANIZATION ||--o{ TEAM : owns
+    BRANCH o|--o{ TEAM : scopes
+    USER o|--o{ TEAM : manages
+    TEAM ||--o{ TEAM_MEMBER : includes
+    USER ||--o{ TEAM_MEMBER : joins
+    ORGANIZATION ||--o{ TERRITORY : owns
+    BRANCH o|--o{ TERRITORY : scopes
+    USER o|--o{ TERRITORY : manages
+    TERRITORY o|--o{ TERRITORY : contains
 ```
 
 `UserRole` is unique per organization/user/role. `RolePermission` is unique per
-organization/role/permission. The schema creates no role or permission records; authentication
-bootstrap behavior remains an application concern.
+organization/role/permission. Schema migrations create no role or permission records;
+onboarding provisions the technical access catalog for the newly requested tenant.
 
 `User.auth_version` invalidates issued access tokens after a password or authorization-sensitive
 account change. Refresh-token rows store idle and absolute expiration boundaries. Password-reset
@@ -61,10 +71,15 @@ consumed as a set when one reset succeeds.
 ```mermaid
 erDiagram
     LEAD_SOURCE o|--o{ LEAD : originates
+    LOST_LEAD_REASON o|--o{ LEAD : explains_loss
+    LEAD_IMPORT_BATCH o|--o{ LEAD : imports
+    LEAD o|--o{ LEAD : duplicate_of
     USER o|--o{ LEAD : owns
     LEAD ||--o{ LEAD_ASSIGNMENT : assignment_history
     USER ||--o{ LEAD_ASSIGNMENT : assignee
     LEAD ||--o{ LEAD_ACTIVITY : activity_history
+    LEAD ||--o{ LEAD_NOTE : notes
+    ORGANIZATION ||--o{ LEAD_SCORE_RULE : configures
     LEAD o|--o| CUSTOMER : converts_to
     CUSTOMER ||--o{ CUSTOMER_DOCUMENT : has
 
@@ -74,35 +89,73 @@ erDiagram
     TOWER o|--o{ UNIT : groups
     FLOOR o|--o{ UNIT : locates
     UNIT ||--o{ UNIT_HOLD : hold_history
+    CUSTOMER ||--o{ UNIT_HOLD : reserves_for
+    USER ||--o{ UNIT_HOLD : salesperson
+    USER o|--o{ UNIT_HOLD : approves
     PROJECT ||--o{ PRICE_LIST : prices
+    PRICE_LIST ||--o{ COST_SHEET : calculates
+    CUSTOMER ||--o{ COST_SHEET : negotiates
+    UNIT ||--o{ COST_SHEET : priced_for
+    COST_SHEET ||--|{ COST_SHEET_ITEM : itemizes
+    COST_SHEET ||--o| DISCOUNT_APPROVAL : approval_request
+    USER ||--o{ DISCOUNT_APPROVAL : requests
+    USER o|--o{ DISCOUNT_APPROVAL : approves
 
     LEAD o|--o{ SITE_VISIT : requests
     CUSTOMER o|--o{ SITE_VISIT : attends
     PROJECT ||--o{ SITE_VISIT : hosts
-    UNIT o|--o{ SITE_VISIT : targets
+    SITE_VISIT ||--o{ SITE_VISIT_UNIT : shortlists
+    UNIT ||--o{ SITE_VISIT_UNIT : interested_unit
 
     LEAD o|--o{ QUOTATION : receives
     CUSTOMER o|--o{ QUOTATION : receives
     PROJECT ||--o{ QUOTATION : quoted_for
+    UNIT o|--o{ QUOTATION : quoted_unit
+    COST_SHEET o|--o| QUOTATION : converted_to
+    QUOTATION o|--o{ QUOTATION : version_parent
     QUOTATION ||--|{ QUOTATION_ITEM : contains
     UNIT o|--o{ QUOTATION_ITEM : itemizes
 
     CUSTOMER ||--o{ BOOKING : makes
     UNIT ||--o{ BOOKING : booking_history
     QUOTATION o|--o{ BOOKING : accepted_as
+    BOOKING ||--|{ BOOKING_APPLICANT : includes
+    BOOKING ||--o| BOOKING_FINANCING : financed_by
     BOOKING ||--o{ BOOKING_DOCUMENT : has
     BOOKING ||--o{ BOOKING_APPROVAL : approval_steps
 ```
 
-Site visits and quotations require a lead or a customer. A customer can retain the lead from which
-it was converted. `active_lead_key`, `active_unit_key` on holds, and `active_unit_key` on bookings
+Site visits and quotations require a lead or a customer. A site visit can shortlist multiple units
+from its selected project through `SiteVisitUnit`; the original nullable `unit_id` retains the first
+shortlisted unit for backward-compatible reads. A customer can retain the lead from which it was
+converted. `active_lead_key`, `active_unit_key` on holds, and `active_unit_key` on bookings
 are nullable MySQL uniqueness keys: the transaction service sets them to the protected entity ID
 while the record is active and clears them when the record becomes historical. This enforces one
 active assignment/hold/booking per protected entity without relying on partial indexes, which
 MySQL does not provide.
 
+`UnitHold` retains soft/hard type, customer, salesperson, reason, approval decision, approver,
+expiry, release details, and every historical lifecycle state. Pending and active rows both retain
+the unique active-unit key and force an effective held status. Creation, approval, release,
+booking conversion, and automatic expiry lock the unit row before mutating the hold. A periodic
+worker expires due rows in bounded batches; inventory reads also reconcile overdue rows so worker
+delay cannot create stale availability.
+
+Controlled booking creation locks the unit, quotation, and hold, then validates a matching accepted
+quotation, an active approved hold, current verified KYC, and a complete payment plan before it
+atomically converts the hold and claims the booking uniqueness key. The primary customer and joint
+applicants are retained as booking snapshots. Submitted payments require independent verification;
+financed bookings require sanction or disbursement before an ordered, requester-separated approval
+chain can confirm the booking and move the unit to `BOOKED`.
+
 `PriceList.pricing_rules` stores a versioned pricing rule document for a project. It does not copy
-unit prices into business data or create price-list rows automatically.
+unit prices into business data or create price-list rows automatically. Cost sheets freeze the
+selected price-list rules, unit facts, option selections, calculated lines, and totals so later
+configuration changes cannot rewrite commercial history. Discounts above the configured
+self-approval limit require a matching matrix level; the backend checks the approver user/role,
+blocks requester self-approval, and records previous and final values before a quotation can be
+created. Quotation revisions retain a shared number, increment under a database lock, and keep
+all earlier versions.
 
 ## Booking finance and customer accounting
 
@@ -118,6 +171,10 @@ erDiagram
     BOOKING ||--o{ PAYMENT : receives
     CUSTOMER ||--o{ PAYMENT : makes
     INSTALLMENT o|--o{ PAYMENT : allocated_to
+    PAYMENT ||--o{ PAYMENT_ALLOCATION : distributes
+    INSTALLMENT o|--o{ PAYMENT_ALLOCATION : receives
+    DEMAND_LETTER o|--o{ PAYMENT_ALLOCATION : settles
+    PAYMENT ||--o{ PAYMENT_RECONCILIATION : reconciles
     PAYMENT ||--o| RECEIPT : acknowledged_by
     CUSTOMER ||--o{ RECEIPT : owns
 
@@ -130,6 +187,8 @@ erDiagram
     CANCELLATION ||--o{ REFUND : produces
     PAYMENT o|--o{ REFUND : reverses
     CUSTOMER ||--o{ REFUND : receives
+    BOOKING ||--o{ FINANCIAL_CHARGE : incurs
+    INSTALLMENT ||--o{ FINANCIAL_CHARGE : calculates_from
 
     BOOKING ||--o{ UNIT_TRANSFER : transfer_history
     UNIT ||--o{ UNIT_TRANSFER : source_unit
@@ -222,7 +281,7 @@ after domain-specific lifecycle changes.
 | Lead | activities, assignments, partner registrations | One lead may convert to at most one customer |
 | Project | towers, units, price lists, construction updates | Codes unique per organization/project scope |
 | Unit | holds, bookings, leases, transfers, maintenance | At most one active hold/booking/lease key per organization |
-| Customer | documents, bookings, finance, possession | All finance references remain tenant-scoped |
+| Customer | activities, documents, bookings, finance, possession, service requests | Customer 360 projects only permission-authorized, tenant-scoped records |
 | Booking | approvals, agreement, plans, payments, lifecycle | One agreement/possession/cancellation per booking |
 | Payment plan | installments | Installment sequence unique within a plan |
 | Payment | receipt, ledger, refund | At most one receipt per payment; idempotent payment intake |
