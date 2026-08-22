@@ -20,7 +20,14 @@ from app.models.entities import (
     UnitHold,
     User,
 )
-from app.models.enums import BookingStatus, HoldStatus, HoldType, ProjectStatus, UnitStatus
+from app.models.enums import (
+    BookingStatus,
+    HoldStatus,
+    HoldType,
+    NotificationEventType,
+    ProjectStatus,
+    UnitStatus,
+)
 from app.schemas.inventory import (
     BookingInitiate,
     FloorCreate,
@@ -44,6 +51,7 @@ from app.schemas.inventory import (
     UnitView,
 )
 from app.schemas.organization import Page
+from app.services.notifications import queue_in_app
 from app.services.organization import MutationContext
 
 RESERVING_HOLD_STATUSES = (HoldStatus.PENDING_APPROVAL, HoldStatus.ACTIVE)
@@ -80,6 +88,8 @@ def _audit(
         new_value=new_value,
         request_id=context.request_id,
         ip_address=context.ip_address,
+        user_agent=context.user_agent,
+        device_metadata=context.device_metadata,
         created_at=_now(),
     )
 
@@ -1121,6 +1131,18 @@ def _mark_hold_expired(
         )
     )
     db.add(audit)
+    queue_in_app(
+        db,
+        organization_id=unit.organization_id,
+        recipient_user_ids=[hold.held_by_user_id],
+        event_type=NotificationEventType.UNIT_HOLD_EXPIRED,
+        title="Unit hold expired",
+        body="The unit has been released back to available inventory.",
+        related_entity_type="unit_hold",
+        related_entity_id=hold.id,
+        action_url="/inventory/holds",
+        data={"unit_id": unit.id, "expired_at": hold.released_at.isoformat()},
+    )
 
 
 async def _expire_hold(

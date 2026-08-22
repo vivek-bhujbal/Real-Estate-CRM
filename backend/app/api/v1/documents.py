@@ -4,7 +4,8 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
 from fastapi.responses import FileResponse
 
-from app.api.dependencies import DbSession, SecurityContext, require_permissions
+from app.api.dependencies import DbSession, SecurityContext, mutation_context, require_permissions
+from app.core.responses import private_file_response
 from app.models.enums import DocumentStatus
 from app.schemas.documents import (
     DocumentOptions,
@@ -30,12 +31,7 @@ DocumentOptionReader = Annotated[
 
 
 def _context(request: Request, security: SecurityContext) -> MutationContext:
-    return MutationContext(
-        actor_user_id=security.user.id,
-        permissions=security.permissions,
-        request_id=request.state.request_id,
-        ip_address=request.client.host if request.client else None,
-    )
+    return mutation_context(request, security)
 
 
 @router.get("", response_model=Page[DocumentView])
@@ -165,14 +161,4 @@ async def download(
     path, file_name, content_type = await document_service.prepare_download(
         db, context.organization_id, document_id, _context(request, context)
     )
-    return FileResponse(
-        path,
-        filename=file_name,
-        media_type=content_type,
-        headers={
-            "Cache-Control": "private, no-store, max-age=0",
-            "Pragma": "no-cache",
-            "X-Content-Type-Options": "nosniff",
-            "Content-Security-Policy": "default-src 'none'; sandbox",
-        },
-    )
+    return private_file_response(path, filename=file_name, media_type=content_type)

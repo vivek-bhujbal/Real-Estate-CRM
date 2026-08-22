@@ -85,6 +85,7 @@ def _view_export(*modules: str) -> set[str]:
 
 
 ALL_PERMISSIONS = frozenset(PERMISSION_CATALOG)
+IN_APP_NOTIFICATION_PERMISSIONS = _grant("notifications", actions=("view", "update"))
 
 BUSINESS_OWNER_PERMISSIONS = frozenset(
     ALL_PERMISSIONS
@@ -129,6 +130,7 @@ BRANCH_MANAGER_PERMISSIONS = frozenset(
     | _grant("users", "roles", actions=("view", "assign"))
     | _grant("branches", "departments", actions=("view", "update"))
     | _grant("teams", "territories", actions=("view", "create", "update", "assign"))
+    | IN_APP_NOTIFICATION_PERMISSIONS
 )
 
 INSIDE_SALES_PERMISSIONS = frozenset(
@@ -146,6 +148,7 @@ FIELD_SALES_PERMISSIONS = frozenset(
     | _grant("documents", actions=("view", "create"))
     | _grant("dashboard", "projects", actions=("view",))
     | _grant("inventory", actions=("view", "assign"))
+    | IN_APP_NOTIFICATION_PERMISSIONS
 )
 
 CRM_EXECUTIVE_PERMISSIONS = frozenset(
@@ -178,12 +181,14 @@ FINANCE_PERMISSIONS = frozenset(
     _grant("collections", "payments", "commissions", "financing")
     | _grant("bookings", "agreements", "customers", actions=("view", "export"))
     | _view_export("dashboard", "reports", "audit")
+    | IN_APP_NOTIFICATION_PERMISSIONS
 )
 
 CHANNEL_MANAGER_PERMISSIONS = frozenset(
     _grant("partners", "commissions", "leads")
     | _grant("customers", "activities", "visits", "bookings", actions=("view", "create", "update"))
     | _view_export("dashboard", "projects", "inventory", "reports")
+    | IN_APP_NOTIFICATION_PERMISSIONS
 )
 
 BROKER_PERMISSIONS = frozenset(
@@ -191,6 +196,7 @@ BROKER_PERMISSIONS = frozenset(
     | _grant("customers", "activities", "visits", actions=("view", "create"))
     | _grant("partners", "commissions", "bookings", actions=("view", "export"))
     | _grant("projects", "inventory", "documents", actions=("view",))
+    | IN_APP_NOTIFICATION_PERMISSIONS
 )
 
 PROPERTY_MANAGER_PERMISSIONS = frozenset(
@@ -216,18 +222,45 @@ CUSTOMER_PERMISSIONS = frozenset(
         "notifications",
         actions=("view",),
     )
+    | _grant("notifications", actions=("update",))
     | _grant("service_requests", actions=("create", "update"))
     | _grant("payments", "documents", actions=("create",))
 )
 
 TENANT_PERMISSIONS = frozenset(
     _grant("properties", "leases", "payments", "notifications", actions=("view",))
+    | _grant("notifications", actions=("update",))
     | _grant("service_requests", actions=("view", "create", "update"))
+    | _grant("maintenance", actions=("view", "create", "update"))
     | _grant("documents", "payments", actions=("view", "create"))
 )
 
+# Portal identities are not yet linked to a Customer or ChannelPartner row.  Keep
+# their effective API access fail-closed until that binding exists; otherwise a
+# view permission is organization-wide and becomes a BOLA vulnerability.  Tenant
+# lease, maintenance and service-request services already enforce their user_id
+# ownership relationship, as do notifications and customer service requests.
+PORTAL_ROLE_PERMISSION_ALLOWLIST: dict[str, frozenset[str]] = {
+    "Broker / Channel Partner": frozenset(
+        _grant("leads", actions=("create",))
+        | _grant("projects", "inventory", actions=("view",))
+        | IN_APP_NOTIFICATION_PERMISSIONS
+    ),
+    "Customer / Buyer": frozenset(
+        _grant("notifications", actions=("view", "update"))
+        | _grant("service_requests", actions=("view", "create", "update"))
+    ),
+    "Tenant": frozenset(
+        _grant("leases", actions=("view",))
+        | _grant("payments", actions=("view", "create"))
+        | _grant("notifications", actions=("view", "update"))
+        | _grant("service_requests", actions=("view", "create", "update"))
+        | _grant("maintenance", actions=("view", "create", "update"))
+    ),
+}
+
 AUDITOR_PERMISSIONS = frozenset(
-    _view_export(*PERMISSION_MODULES) | _grant("audit", actions=("view", "export", "manage"))
+    _view_export(*PERMISSION_MODULES)
 )
 
 ROLE_TEMPLATES = (

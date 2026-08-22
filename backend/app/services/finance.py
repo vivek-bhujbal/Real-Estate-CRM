@@ -30,6 +30,7 @@ from app.models.enums import (
     FinancialChargeStatus,
     InstallmentStatus,
     LedgerEntryType,
+    NotificationEventType,
     PaymentStatus,
     ReconciliationStatus,
     RecordStatus,
@@ -57,6 +58,7 @@ from app.schemas.finance import (
     RefundProcess,
 )
 from app.schemas.organization import Page
+from app.services import notifications as notification_service
 from app.services.organization import MutationContext
 
 ZERO = Decimal("0.00")
@@ -94,6 +96,8 @@ def _audit(
         new_value=after,
         request_id=context.request_id,
         ip_address=context.ip_address,
+        user_agent=context.user_agent,
+        device_metadata=context.device_metadata,
         created_at=_now(),
     )
 
@@ -486,6 +490,23 @@ async def create_demand(
             {"booking_id": booking.id, "installment_id": installment.id, "amount": str(amount)},
         )
     )
+    demand_recipients = await notification_service.recipients_for_permission(
+        db, org, "collections.approve"
+    )
+    if booking.salesperson_user_id:
+        demand_recipients.add(booking.salesperson_user_id)
+    notification_service.queue_in_app(
+        db,
+        organization_id=org,
+        recipient_user_ids=demand_recipients,
+        event_type=NotificationEventType.DEMAND_LETTER_ISSUED,
+        title="Demand letter issued",
+        body=f"{demand.demand_number} · {demand.currency} {demand.amount}",
+        related_entity_type="demand_letter",
+        related_entity_id=demand.id,
+        action_url=f"/collections/{booking.id}",
+        data={"booking_id": booking.id, "due_date": demand.due_date.isoformat()},
+    )
     await db.commit()
     return await detail(db, org, booking.id)
 
@@ -755,6 +776,23 @@ async def allocate_payment(
             {"status": PaymentStatus.PROCESSING.value},
             {"status": PaymentStatus.COMPLETED.value, "receipt_number": receipt.receipt_number},
         )
+    )
+    payment_recipients = await notification_service.recipients_for_permission(
+        db, org, "collections.approve"
+    )
+    if booking.salesperson_user_id:
+        payment_recipients.add(booking.salesperson_user_id)
+    notification_service.queue_in_app(
+        db,
+        organization_id=org,
+        recipient_user_ids=payment_recipients,
+        event_type=NotificationEventType.PAYMENT_RECEIVED,
+        title="Payment received",
+        body=f"{payment.currency} {payment.amount} received for {booking.booking_number}",
+        related_entity_type="payment",
+        related_entity_id=payment.id,
+        action_url=f"/collections/{booking.id}",
+        data={"booking_id": booking.id, "receipt_number": receipt.receipt_number},
     )
     await db.commit()
     return await detail(db, org, booking.id)

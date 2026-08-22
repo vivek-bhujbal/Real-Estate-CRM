@@ -98,6 +98,8 @@ async def create_role(
     *,
     request_id: str | None,
     ip_address: str | None,
+    user_agent: str | None,
+    device_metadata: dict[str, str] | None,
 ) -> RoleView:
     permissions = await _permissions_by_code(db, organization_id, payload.permission_codes)
     _ensure_can_grant(actor_permissions, payload.permission_codes)
@@ -130,6 +132,8 @@ async def create_role(
                 new_value=_role_snapshot(role, payload.permission_codes),
                 request_id=request_id,
                 ip_address=ip_address,
+                user_agent=user_agent,
+                device_metadata=device_metadata,
             )
         )
         await db.commit()
@@ -154,6 +158,8 @@ async def update_role(
     *,
     request_id: str | None,
     ip_address: str | None,
+    user_agent: str | None,
+    device_metadata: dict[str, str] | None,
 ) -> RoleView:
     role = await _tenant_role(db, organization_id, role_id, lock=True)
     administrator_name = "Organization Administrator"
@@ -214,6 +220,8 @@ async def update_role(
             new_value=_role_snapshot(role, next_permission_codes),
             request_id=request_id,
             ip_address=ip_address,
+            user_agent=user_agent,
+            device_metadata=device_metadata,
         )
     )
     try:
@@ -237,6 +245,8 @@ async def delete_role(
     *,
     request_id: str | None,
     ip_address: str | None,
+    user_agent: str | None,
+    device_metadata: dict[str, str] | None,
 ) -> None:
     role = await _tenant_role(db, organization_id, role_id, lock=True)
     if role.is_system:
@@ -275,6 +285,8 @@ async def delete_role(
             new_value=None,
             request_id=request_id,
             ip_address=ip_address,
+            user_agent=user_agent,
+            device_metadata=device_metadata,
         )
     )
     await db.execute(
@@ -297,6 +309,8 @@ async def replace_user_roles(
     *,
     request_id: str | None,
     ip_address: str | None,
+    user_agent: str | None,
+    device_metadata: dict[str, str] | None,
 ) -> UserRoleView:
     if user_id == actor_user_id:
         raise AppError(
@@ -376,6 +390,8 @@ async def replace_user_roles(
             new_value={"role_ids": sorted(role_ids)},
             request_id=request_id,
             ip_address=ip_address,
+            user_agent=user_agent,
+            device_metadata=device_metadata,
             created_at=_db_now(),
         )
     )
@@ -564,6 +580,8 @@ def _audit_log(
     new_value: dict[str, object] | None,
     request_id: str | None,
     ip_address: str | None,
+    user_agent: str | None,
+    device_metadata: dict[str, str] | None,
 ) -> AuditLog:
     return AuditLog(
         organization_id=organization_id,
@@ -575,6 +593,8 @@ def _audit_log(
         new_value=new_value,
         request_id=request_id,
         ip_address=ip_address,
+        user_agent=user_agent,
+        device_metadata=device_metadata,
         created_at=_db_now(),
     )
 

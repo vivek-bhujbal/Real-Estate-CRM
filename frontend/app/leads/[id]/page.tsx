@@ -6,6 +6,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 
 import { AppShell } from "@/components/app-shell";
 import { useAuth } from "@/components/auth-provider";
+import { useConfirmDialog } from "@/components/confirm-dialog";
 import { LeadNavigation } from "@/components/lead-navigation";
 import {
   ActivityType,
@@ -52,6 +53,7 @@ function leadDraft(lead: Lead): LeadDraft {
 }
 
 export default function LeadDetailPage() {
+  const confirmDialog = useConfirmDialog();
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const { session } = useAuth();
@@ -165,7 +167,7 @@ export default function LeadDetailPage() {
   }
 
   async function convert() {
-    if (!window.confirm("Convert this qualified lead into a customer?")) return;
+    if (!(await confirmDialog({ title: "Convert lead to customer?", message: "A customer profile will be created from this qualified lead. The lead will move to converted status.", confirmLabel: "Convert lead" }))) return;
     setSaving(true); setError(null);
     try {
       const result = await apiRequest<{ customer_id: string }>(`/leads/${leadId}/convert`, { method: "POST", body: "{}" });
@@ -174,7 +176,7 @@ export default function LeadDetailPage() {
   }
 
   async function removeLead() {
-    if (!canDelete || !window.confirm(`Delete ${lead?.full_name}?`)) return;
+    if (!canDelete || !(await confirmDialog({ title: "Delete lead?", message: `${lead?.full_name ?? "This lead"} and its non-transactional history will be permanently removed.`, confirmLabel: "Delete lead", tone: "danger" }))) return;
     setSaving(true); setError(null);
     try { await apiRequest<void>(`/leads/${leadId}`, { method: "DELETE" }); router.push("/leads"); }
     catch (reason) { setError(message(reason)); setSaving(false); }
@@ -201,7 +203,7 @@ export default function LeadDetailPage() {
   }
 
   async function removeActivity(item: LeadActivity) {
-    if (!window.confirm(`Delete activity “${item.subject}”?`)) return;
+    if (!(await confirmDialog({ title: "Delete activity?", message: `${item.subject} will be removed from the lead timeline.`, confirmLabel: "Delete activity", tone: "danger" }))) return;
     try { await apiRequest<void>(`/leads/${leadId}/activities/${item.id}`, { method: "DELETE" }); refreshed("Activity deleted"); }
     catch (reason) { setError(message(reason)); }
   }
@@ -213,7 +215,7 @@ export default function LeadDetailPage() {
   }
 
   async function removeNote(note: LeadNote) {
-    if (!window.confirm("Delete this note?")) return;
+    if (!(await confirmDialog({ title: "Delete note?", message: "This internal note will be permanently removed from the lead.", confirmLabel: "Delete note", tone: "danger" }))) return;
     try { await apiRequest<void>(`/leads/${leadId}/notes/${note.id}`, { method: "DELETE" }); refreshed("Note deleted"); }
     catch (reason) { setError(message(reason)); }
   }

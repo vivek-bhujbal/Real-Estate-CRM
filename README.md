@@ -54,11 +54,46 @@ Role and permission rows created during onboarding are technical access metadata
 
 ## Run with Docker
 
-1. Copy `.env.example` to `.env` and replace every secret/password value.
-2. Run `docker compose up --build`.
-3. Open `http://localhost:3000`; API docs are at `http://localhost:8000/docs` in development.
+1. Copy `.env.example` to `.env` and replace every password/secret placeholder with independently generated values. Keep `.env` local; it is git-ignored.
+2. Start the production-like containers:
 
-Database migrations run in the backend container before the API starts. On the first visit, create an organization and administrator through the onboarding screen.
+   ```powershell
+   docker compose up --build -d
+   docker compose ps
+   ```
+
+3. Open `http://localhost:3000`; API docs are available at `http://localhost:8000/docs` while `APP_ENV=development`.
+
+MySQL and Redis are reachable only by containers on the private `crm-network` in this workflow. MySQL data, Redis append-only data, and development private uploads use named volumes. Staging and production fail closed unless encrypted S3-compatible storage, a ClamAV service, SMTP, HTTPS origins, and a protected metrics token are configured.
+
+### Container development workflow
+
+Use the development override for frontend and backend hot reload. It also publishes MySQL and Redis on the configurable local ports from `.env`:
+
+```powershell
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+```
+
+Frontend source is bind-mounted and Next.js dependencies/build cache remain in named volumes. Backend application and migration source are bind-mounted; the API runs with Uvicorn reload. Rebuild after changing dependency manifests or Dockerfiles.
+
+Useful commands:
+
+```powershell
+docker compose logs -f backend frontend
+docker compose down
+```
+
+To intentionally delete all local container data and return to a brand-new empty database, stop the stack with `docker compose down --volumes`. This permanently removes the named MySQL, Redis, upload, and development cache volumes.
+
+The one-shot `migrate` service must finish successfully before the backend starts. API replicas never run migrations themselves, preventing migration races when the API is scaled. Migrations create schema only: no organization, user, lead, project, booking, financial transaction, or other demo/business data is seeded. On the first visit, create an organization and administrator explicitly through the onboarding screen.
+
+Run the isolated empty-database/health smoke test from PowerShell after exporting the required environment variables:
+
+```powershell
+.\scripts\compose-smoke.ps1
+```
+
+The CI workflow additionally runs a live MySQL migration/drift check, Compose persistence smoke, dependency audits, container scans, and production builds.
 
 ## Local verification
 
@@ -73,5 +108,7 @@ cd ../frontend
 npm install
 npm run lint
 npm run typecheck
+npm test
 npm run build
+npm run test:e2e
 ```

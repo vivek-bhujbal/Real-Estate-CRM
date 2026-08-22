@@ -2,7 +2,13 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Request
 
-from app.api.dependencies import DbSession, SecurityContext, require_permissions
+from app.api.dependencies import (
+    DbSession,
+    SecurityContext,
+    mutation_context,
+    require_permission_groups,
+    require_permissions,
+)
 from app.schemas.finance import (
     ChargeCreate,
     ChargeWaive,
@@ -29,7 +35,12 @@ CollectionCreator = Annotated[
     Depends(require_permissions("collections.create", "collections.manage", any_of=True)),
 ]
 PaymentCreator = Annotated[
-    SecurityContext, Depends(require_permissions("payments.create", "payments.manage", any_of=True))
+    SecurityContext,
+    Depends(
+        require_permission_groups(
+            ("collections.view",), ("payments.create", "payments.manage")
+        )
+    ),
 ]
 PaymentApprover = Annotated[
     SecurityContext,
@@ -42,12 +53,7 @@ CollectionApprover = Annotated[
 
 
 def _context(request: Request, security: SecurityContext) -> MutationContext:
-    return MutationContext(
-        actor_user_id=security.user.id,
-        permissions=security.permissions,
-        request_id=request.state.request_id,
-        ip_address=request.client.host if request.client else None,
-    )
+    return mutation_context(request, security)
 
 
 @router.get("/summary", response_model=FinanceSummary)

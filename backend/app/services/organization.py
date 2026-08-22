@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from math import ceil
@@ -24,6 +25,8 @@ from app.models.entities import (
     UserRole,
 )
 from app.schemas.organization import (
+    AuditActorOption,
+    AuditFilterOptions,
     AuditLogView,
     BranchCreate,
     BranchUpdate,
@@ -52,6 +55,8 @@ class MutationContext:
     permissions: frozenset[str]
     request_id: str | None
     ip_address: str | None
+    user_agent: str | None = None
+    device_metadata: dict[str, str] | None = None
 
 
 def _now() -> datetime:
@@ -818,55 +823,196 @@ async def list_audit_logs(
     q: str | None,
     action: str | None,
     entity_type: str | None,
+    actor_user_id: str | None,
+    entity_id: str | None,
+    date_from: datetime | None,
+    date_to: datetime | None,
     page: int,
     page_size: int,
 ) -> Page[AuditLogView]:
+    filters = _audit_filters(
+        organization_id,
+        q=q,
+        action=action,
+        entity_type=entity_type,
+        actor_user_id=actor_user_id,
+        entity_id=entity_id,
+        date_from=date_from,
+        date_to=date_to,
+    )
+    total = await _count(db, AuditLog, filters)
+    rows = (
+        await db.execute(
+            _audit_query(filters)
+            .outerjoin(
+                User,
+                (User.organization_id == AuditLog.organization_id)
+                & (User.id == AuditLog.actor_user_id),
+            )
+            .order_by(AuditLog.created_at.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        )
+    ).all()
+    return _page(_audit_views(rows), total, page, page_size)
+
+
+async def audit_filter_options(
+    db: AsyncSession, organization_id: str
+) -> AuditFilterOptions:
+    actions = list(
+        (
+            await db.scalars(
+                select(AuditLog.action)
+                .where(AuditLog.organization_id == organization_id)
+                .distinct()
+                .order_by(AuditLog.action)
+            )
+        ).all()
+    )
+    entity_types = list(
+        (
+            await db.scalars(
+                select(AuditLog.entity_type)
+                .where(AuditLog.organization_id == organization_id)
+                .distinct()
+                .order_by(AuditLog.entity_type)
+            )
+        ).all()
+    )
+    actor_rows = (
+        await db.execute(
+            select(User.id, User.full_name)
+            .join(
+                AuditLog,
+                (AuditLog.organization_id == User.organization_id)
+                & (AuditLog.actor_user_id == User.id),
+            )
+            .where(AuditLog.organization_id == organization_id)
+            .distinct()
+            .order_by(User.full_name)
+        )
+    ).all()
+    return AuditFilterOptions(
+        actions=actions,
+        entity_types=entity_types,
+        actors=[AuditActorOption(id=actor_id, name=name) for actor_id, name in actor_rows],
+    )
+
+
+async def audit_export_rows(
+    db: AsyncSession,
+    organization_id: str,
+    *,
+    q: str | None,
+    action: str | None,
+    entity_type: str | None,
+    actor_user_id: str | None,
+    entity_id: str | None,
+    date_from: datetime | None,
+    date_to: datetime | None,
+    limit: int = 10_000,
+) -> list[AuditLogView]:
+    filters = _audit_filters(
+        organization_id,
+        q=q,
+        action=action,
+        entity_type=entity_type,
+        actor_user_id=actor_user_id,
+        entity_id=entity_id,
+        date_from=date_from,
+        date_to=date_to,
+    )
+    rows = (
+        await db.execute(
+            _audit_query(filters)
+            .outerjoin(
+                User,
+                (User.organization_id == AuditLog.organization_id)
+                & (User.id == AuditLog.actor_user_id),
+            )
+            .order_by(AuditLog.created_at.desc())
+            .limit(limit)
+        )
+    ).all()
+    return _audit_views(rows)
+
+
+def _audit_query(filters: list[Any]) -> Select[Any]:
+    return (
+        select(AuditLog, User.full_name, Organization.name)
+        .join(Organization, Organization.id == AuditLog.organization_id)
+        .where(*filters)
+    )
+
+
+def _audit_views(rows: Sequence[Any]) -> list[AuditLogView]:
+    return [
+        AuditLogView(
+            id=audit.id,
+            organization_id=audit.organization_id,
+            organization_name=organization_name,
+            actor_user_id=audit.actor_user_id,
+            actor_name=actor_name,
+            action=audit.action,
+            entity_type=audit.entity_type,
+            entity_id=audit.entity_id,
+            old_value=audit.previous_value,
+            previous_value=audit.previous_value,
+            new_value=audit.new_value,
+            request_id=audit.request_id,
+            ip_address=audit.ip_address,
+            user_agent=audit.user_agent,
+            device_metadata=audit.device_metadata,
+            created_at=audit.created_at,
+        )
+        for audit, actor_name, organization_name in rows
+    ]
+
+
+def _audit_filters(
+    organization_id: str,
+    *,
+    q: str | None,
+    action: str | None,
+    entity_type: str | None,
+    actor_user_id: str | None,
+    entity_id: str | None,
+    date_from: datetime | None,
+    date_to: datetime | None,
+) -> list[Any]:
     filters: list[Any] = [AuditLog.organization_id == organization_id]
-    if q:
-        pattern = f"%{q.strip()}%"
+    if q and (term := q.strip()):
+        pattern = f"%{term}%"
+        matching_actors = select(User.id).where(
+            User.organization_id == organization_id, User.full_name.ilike(pattern)
+        )
         filters.append(
             or_(
                 AuditLog.action.ilike(pattern),
                 AuditLog.entity_type.ilike(pattern),
                 AuditLog.entity_id.ilike(pattern),
+                AuditLog.request_id.ilike(pattern),
+                AuditLog.actor_user_id.in_(matching_actors),
             )
         )
     if action:
         filters.append(AuditLog.action == action)
     if entity_type:
         filters.append(AuditLog.entity_type == entity_type)
-    total = await _count(db, AuditLog, filters)
-    rows = (
-        await db.execute(
-            select(AuditLog, User.full_name)
-            .outerjoin(
-                User,
-                (User.organization_id == AuditLog.organization_id)
-                & (User.id == AuditLog.actor_user_id),
-            )
-            .where(*filters)
-            .order_by(AuditLog.created_at.desc())
-            .offset((page - 1) * page_size)
-            .limit(page_size)
-        )
-    ).all()
-    items = [
-        AuditLogView(
-            id=audit.id,
-            actor_user_id=audit.actor_user_id,
-            actor_name=actor_name,
-            action=audit.action,
-            entity_type=audit.entity_type,
-            entity_id=audit.entity_id,
-            previous_value=audit.previous_value,
-            new_value=audit.new_value,
-            request_id=audit.request_id,
-            ip_address=audit.ip_address,
-            created_at=audit.created_at,
-        )
-        for audit, actor_name in rows
-    ]
-    return _page(items, total, page, page_size)
+    if actor_user_id:
+        filters.append(AuditLog.actor_user_id == actor_user_id)
+    if entity_id:
+        filters.append(AuditLog.entity_id == entity_id)
+    if date_from:
+        filters.append(AuditLog.created_at >= _naive_utc(date_from))
+    if date_to:
+        filters.append(AuditLog.created_at <= _naive_utc(date_to))
+    return filters
+
+
+def _naive_utc(value: datetime) -> datetime:
+    return value.astimezone(UTC).replace(tzinfo=None) if value.tzinfo else value
 
 
 async def _count(db: AsyncSession, model: type[Any], filters: list[Any]) -> int:
@@ -1221,6 +1367,8 @@ def _audit(
         new_value=new_value,
         request_id=context.request_id,
         ip_address=context.ip_address,
+        user_agent=context.user_agent,
+        device_metadata=context.device_metadata,
         created_at=_now(),
     )
 

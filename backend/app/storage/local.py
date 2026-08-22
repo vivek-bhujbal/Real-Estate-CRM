@@ -4,6 +4,8 @@ import shutil
 import uuid
 from pathlib import Path
 
+from app.storage.base import StoredFile
+
 
 class LocalStorage:
     def __init__(self, root: Path) -> None:
@@ -46,9 +48,9 @@ class LocalStorage:
         if target.exists():
             await asyncio.to_thread(target.unlink)
 
-    async def path_for_read(self, *, key: str) -> Path:
+    async def path_for_read(self, *, key: str) -> StoredFile:
         target = self._safe_path(key)
         exists = await asyncio.to_thread(target.is_file)
         if not exists:
             raise FileNotFoundError(key)
-        return target
+        return StoredFile(target)

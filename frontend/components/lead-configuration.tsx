@@ -2,6 +2,8 @@
 
 import { FormEvent, useEffect, useState } from "react";
 
+import { useConfirmDialog } from "@/components/confirm-dialog";
+
 import {
   apiRequest,
   ApiError,
@@ -27,6 +29,7 @@ function message(reason: unknown): string {
 }
 
 export function LeadConfiguration({ onClose }: { onClose: () => void }) {
+  const confirmDialog = useConfirmDialog();
   const [tab, setTab] = useState<Tab>("sources");
   const [sources, setSources] = useState<LeadSource[]>([]);
   const [reasons, setReasons] = useState<LostReason[]>([]);
@@ -108,7 +111,7 @@ export function LeadConfiguration({ onClose }: { onClose: () => void }) {
   }
 
   async function remove(item: ConfigItem) {
-    if (!window.confirm(`Delete ${item.name}?`)) return;
+    if (!(await confirmDialog({ title: "Delete configuration?", message: `${item.name} will be removed if no lead records depend on it.`, confirmLabel: "Delete", tone: "danger" }))) return;
     setError(null);
     try {
       await apiRequest<void>(`/leads/${tab}/${item.id}`, { method: "DELETE" });

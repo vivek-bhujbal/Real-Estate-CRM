@@ -34,6 +34,7 @@ from app.models.entities import (
 from app.models.enums import (
     ApprovalStatus,
     CostSheetStatus,
+    NotificationEventType,
     QuotationStatus,
     RecordStatus,
 )
@@ -61,6 +62,7 @@ from app.schemas.quotations import (
     QuotationVersionCreate,
     QuotationView,
 )
+from app.services import notifications as notification_service
 from app.services.organization import MutationContext
 
 MONEY = Decimal("0.01")
@@ -230,6 +232,8 @@ def _audit(
         new_value=after,
         request_id=context.request_id,
         ip_address=context.ip_address,
+        user_agent=context.user_agent,
+        device_metadata=context.device_metadata,
         created_at=_now(),
     )
 
@@ -998,6 +1002,32 @@ async def create_cost_sheet(
                 },
             )
         )
+        approver_ids = set(approval.required_approver_user_ids)
+        approver_ids.update(
+            await notification_service.recipients_for_roles(
+                db, organization_id, approval.required_approver_role_ids
+            )
+        )
+        approver_ids.discard(context.actor_user_id)
+        notification_service.queue_in_app(
+            db,
+            organization_id=organization_id,
+            recipient_user_ids=approver_ids,
+            event_type=NotificationEventType.DISCOUNT_APPROVAL_REQUESTED,
+            title="Discount approval requested",
+            body=(
+                f"{approval.approval_level_name}: "
+                f"{sheet.currency} {approval.requested_discount_amount}"
+            ),
+            related_entity_type="discount_approval",
+            related_entity_id=approval.id,
+            action_url=f"/cost-sheets/{sheet.id}",
+            data={
+                "cost_sheet_id": sheet.id,
+                "requested_by_user_id": context.actor_user_id,
+                "requested_percentage": str(approval.requested_discount_percent),
+            },
+        )
     db.add(
         _audit(
             organization_id,
@@ -1253,6 +1283,18 @@ async def decide_discount(
             },
         )
     )
+    notification_service.queue_in_app(
+        db,
+        organization_id=organization_id,
+        recipient_user_ids=[approval.requested_by_user_id],
+        event_type=NotificationEventType.DISCOUNT_APPROVAL_DECIDED,
+        title=f"Discount request {approval.status.value.lower()}",
+        body=approval.decision_notes or f"Decision: {approval.status.value}",
+        related_entity_type="discount_approval",
+        related_entity_id=approval.id,
+        action_url=f"/cost-sheets/{sheet.id}",
+        data={"cost_sheet_id": sheet.id, "status": approval.status.value},
+    )
     await db.commit()
     return await get_cost_sheet(db, organization_id, sheet.id)
 
@@ -1459,6 +1501,18 @@ async def create_quotation(
             {"quotation_number": quote.quotation_number, "version": 1},
         )
     )
+    notification_service.queue_in_app(
+        db,
+        organization_id=organization_id,
+        recipient_user_ids=[quote.created_by_user_id],
+        event_type=NotificationEventType.QUOTATION_CREATED,
+        title="Quotation created",
+        body=f"{quote.quotation_number} · Version {quote.version}",
+        related_entity_type="quotation",
+        related_entity_id=quote.id,
+        action_url=f"/quotations/{quote.id}",
+        data={"quotation_number": quote.quotation_number, "version": quote.version},
+    )
     await _commit_conflict(db, "DUPLICATE_QUOTATION", "Quotation could not be created")
     await db.refresh(quote)
     return await _quotation_view(db, organization_id, quote)
@@ -1644,6 +1698,18 @@ async def change_quotation_status(
             {"status": before},
             {"status": target.value},
         )
+    )
+    notification_service.queue_in_app(
+        db,
+        organization_id=organization_id,
+        recipient_user_ids=[quote.created_by_user_id],
+        event_type=NotificationEventType.QUOTATION_STATUS_CHANGED,
+        title="Quotation status updated",
+        body=f"{quote.quotation_number}: {before} → {target.value}",
+        related_entity_type="quotation",
+        related_entity_id=quote.id,
+        action_url=f"/quotations/{quote.id}",
+        data={"previous_status": before, "status": target.value},
     )
     await db.commit()
     await db.refresh(quote)

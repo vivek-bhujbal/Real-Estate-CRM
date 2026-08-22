@@ -13,7 +13,8 @@ const items = [
   { label: "Users", href: "/settings/users", permission: "users.view" },
   { label: "Teams", href: "/settings/teams", permission: "teams.view" },
   { label: "Territories", href: "/settings/territories", permission: "territories.view" },
-  { label: "Roles", href: "/settings/roles", permission: "roles.view" }
+  { label: "Roles", href: "/settings/roles", permission: "roles.view" },
+  { label: "Audit trail", href: "/settings/audit", permission: "audit.view" }
 ];
 
 export function SettingsNavigation() {

@@ -48,6 +48,14 @@ export type PageResponse<T> = {
   total: number;
   pages: number;
 };
+export type DashboardKind = "EXECUTIVE" | "SALES" | "MARKETING" | "INVENTORY" | "COLLECTIONS" | "PARTNER" | "CUSTOMER";
+export type DashboardMetricFormat = "NUMBER" | "CURRENCY" | "PERCENT";
+export type DashboardCatalogItem = { kind: DashboardKind; label: string; description: string };
+export type DashboardCatalog = { items: DashboardCatalogItem[]; default_dashboard: DashboardKind | null };
+export type DashboardMetric = { key: string; label: string; value: string; format: DashboardMetricFormat; detail: string };
+export type DashboardChartPoint = { label: string; value: string; total: string | null };
+export type DashboardChart = { key: string; title: string; description: string; format: DashboardMetricFormat; points: DashboardChartPoint[]; empty_message: string };
+export type DashboardView = { kind: DashboardKind; title: string; description: string; currency: string | null; as_of: string; metrics: DashboardMetric[]; charts: DashboardChart[] };
 export type OrganizationManagement = {
   id: string;
   name: string;
@@ -89,11 +97,25 @@ export type Territory = {
   is_active: boolean; created_at: string; updated_at: string;
 };
 export type AuditLog = {
-  id: string; actor_user_id: string | null; actor_name: string | null; action: string;
-  entity_type: string; entity_id: string; previous_value: Record<string, unknown> | null;
+  id: string; organization_id: string; organization_name: string;
+  actor_user_id: string | null; actor_name: string | null; action: string;
+  entity_type: string; entity_id: string; old_value: Record<string, unknown> | null;
+  previous_value: Record<string, unknown> | null;
   new_value: Record<string, unknown> | null; request_id: string | null;
-  ip_address: string | null; created_at: string;
+  ip_address: string | null; user_agent: string | null;
+  device_metadata: Record<string, unknown> | null; created_at: string;
 };
+export type AuditActorOption = { id: string; name: string };
+export type AuditFilterOptions = { actions: string[]; entity_types: string[]; actors: AuditActorOption[] };
+export type NotificationStatus = "QUEUED" | "SENT" | "DELIVERED" | "FAILED" | "READ";
+export type InAppNotification = {
+  id: string; event_type: string; title: string; body: string; status: NotificationStatus;
+  action_url: string | null; data: Record<string, unknown> | null;
+  related_entity_type: string | null; related_entity_id: string | null;
+  sent_at: string | null; read_at: string | null; created_at: string;
+};
+export type NotificationUnreadCount = { unread: number };
+export type NotificationMarkAllResult = { marked_read: number };
 export type LeadStatus = "NEW" | "ASSIGNED" | "ATTEMPTED" | "CONTACTED" | "QUALIFIED" | "DISQUALIFIED" | "LOST" | "CONVERTED";
 export type ActivityType = "CALL" | "EMAIL" | "MEETING" | "NOTE" | "STATUS_CHANGE" | "FOLLOW_UP";
 export type Lead = {
@@ -439,6 +461,56 @@ export type PropertyLifecycleDetail = {
   handover: null | { id: string; status: WorkflowStatus; handover_at: string | null; notes: string | null; customer_acknowledgement_name: string | null; customer_acknowledgement_notes: string | null; customer_acknowledged_at: string | null; documents: Array<{ id: string; document_type: string; is_required: boolean; file_name: string | null; uploaded_at: string | null }> };
 };
 export type PropertyLifecycleOption = { id: string; booking_number: string; customer_name: string; project_name: string; unit_number: string };
+
+export type RentalPropertyStatus = "AVAILABLE" | "RESERVED" | "OCCUPIED" | "MAINTENANCE" | "INACTIVE";
+export type RentalProperty = {
+  id: string; code: string; name: string; property_type: string; address: string; city: string;
+  bedrooms: number | null; bathrooms: number | null; area_sqft: string | null; amenities: string[];
+  default_monthly_rent: string; default_security_deposit: string; currency: string;
+  status: RentalPropertyStatus; manager_user_id: string | null; manager_name: string | null;
+  active_lease_id: string | null; created_at: string; updated_at: string;
+};
+export type RentalTenant = {
+  id: string; user_id: string | null; full_name: string; email: string | null; phone: string | null;
+  alternate_phone: string | null; identity_type: string | null; identity_reference: string | null;
+  address: string | null; emergency_contact_name: string | null; emergency_contact_phone: string | null;
+  status: string; active_leases: number; outstanding_rent: string; created_at: string; updated_at: string;
+};
+export type LeaseStatus = "DRAFT" | "PENDING_SIGNATURE" | "SIGNED" | "MOVE_IN_PENDING" | "ACTIVE" | "NOTICE_GIVEN" | "MOVE_OUT_PENDING" | "EXPIRED" | "TERMINATED" | "RENEWED";
+export type RentalLease = {
+  id: string; lease_number: string; status: LeaseStatus; tenant_id: string; tenant_name: string;
+  property_id: string; property_name: string; property_code: string; start_date: string; end_date: string;
+  monthly_rent: string; currency: string; outstanding: string; overdue_invoices: number; updated_at: string;
+};
+export type RentalDocument = { id: string; document_type: string; version: number; is_required: boolean; status: DocumentStatus; file_name: string | null; rejection_reason: string | null; uploaded_at: string | null; reviewed_at: string | null };
+export type RentScheduleItem = { id: string; sequence: number; period_start: string; period_end: string; due_date: string; amount: string; currency: string; status: string };
+export type RentalInvoice = { id: string; rent_schedule_item_id: string | null; invoice_number: string; status: string; period_start: string; period_end: string; issue_date: string; due_date: string; amount: string; tax_amount: string; total: string; paid_amount: string; outstanding: string; currency: string };
+export type RentPayment = { id: string; rental_invoice_id: string; status: string; amount: string; currency: string; method: string; reference_number: string | null; paid_at: string | null; verified_at: string | null; rejection_reason: string | null };
+export type LeaseRenewal = { id: string; status: WorkflowStatus; previous_end_date: string; proposed_end_date: string; previous_monthly_rent: string; proposed_monthly_rent: string; reason: string; decision_notes: string | null; requested_at: string; decided_at: string | null; applied_at: string | null };
+export type LeaseMove = { id: string; move_type: "MOVE_IN" | "MOVE_OUT"; status: WorkflowStatus; scheduled_at: string; checklist: Record<string, unknown> | null; meter_readings: Record<string, unknown> | null; notes: string | null; requested_at: string; approved_at: string | null; completed_at: string | null };
+export type RentalMaintenance = { id: string; lease_id: string | null; rental_property_id: string | null; title: string; description: string | null; status: string; assigned_user_id: string | null; scheduled_at: string | null; completed_at: string | null; cost: string | null; currency: string | null; created_at: string };
+export type RentalLeaseDetail = {
+  lease: RentalLease; security_deposit: string; rent_due_day: number; notice_period_days: number;
+  terms: string | null; documents: RentalDocument[]; schedule: RentScheduleItem[];
+  invoices: RentalInvoice[]; payments: RentPayment[]; renewals: LeaseRenewal[];
+  moves: LeaseMove[]; maintenance: RentalMaintenance[];
+};
+export type RentalStats = { total_properties: number; available_properties: number; occupied_properties: number; active_leases: number; overdue_invoices: number; outstanding_rent: string; open_maintenance: number };
+export type RentalOptions = { properties: RentalProperty[]; tenants: RentalTenant[]; managers: Array<{id: string; label: string}> };
+
+export type ServicePriority = "LOW" | "MEDIUM" | "HIGH" | "URGENT";
+export type TicketStatus = "OPEN" | "ASSIGNED" | "IN_PROGRESS" | "WAITING_FOR_CUSTOMER" | "RESOLVED" | "CLOSED";
+export type ServiceCategory = { id: string; code: string; name: string; description: string | null; is_active: boolean; policy_count: number; ticket_count: number; created_at: string; updated_at: string };
+export type ServiceSLAPolicy = { id: string; category_id: string; category_name: string; priority: ServicePriority; first_response_minutes: number; escalation_minutes: number; resolution_minutes: number; is_active: boolean; created_at: string; updated_at: string };
+export type TicketSLA = { configured: boolean; response_state: "NOT_CONFIGURED" | "ON_TRACK" | "MET" | "BREACHED"; resolution_state: "NOT_CONFIGURED" | "ON_TRACK" | "MET" | "BREACHED"; response_due_at: string | null; resolution_due_at: string | null; escalation_due_at: string | null; first_responded_at: string | null; response_remaining_minutes: number | null; resolution_remaining_minutes: number | null; escalation_due: boolean };
+export type ServiceTicket = { id: string; request_number: string; subject: string; category_id: string | null; category_name: string; priority: ServicePriority; status: TicketStatus; requester_name: string; requester_type: string; assigned_user_id: string | null; assigned_user_name: string | null; is_escalated: boolean; sla: TicketSLA; opened_at: string; updated_at: string; resolved_at: string | null; closed_at: string | null };
+export type TicketComment = { id: string; author_user_id: string; author_name: string; body: string; is_internal: boolean; created_at: string };
+export type TicketAttachment = { id: string; comment_id: string | null; file_name: string; content_type: string; size_bytes: number; uploaded_by_name: string; created_at: string };
+export type TicketEscalation = { id: string; status: "OPEN" | "ACKNOWLEDGED" | "RESOLVED"; from_user_name: string | null; to_user_id: string; to_user_name: string; escalated_by_name: string | null; acknowledged_by_name: string | null; reason: string; escalated_at: string; acknowledged_at: string | null; resolved_at: string | null };
+export type TicketFeedback = { id: string; rating: number; comments: string | null; submitted_by_name: string; submitted_at: string };
+export type ServiceTicketDetail = { ticket: ServiceTicket; description: string; customer_id: string | null; tenant_id: string | null; project_id: string | null; project_name: string | null; unit_id: string | null; unit_number: string | null; resolution_summary: string | null; closure_notes: string | null; comments: TicketComment[]; attachments: TicketAttachment[]; escalations: TicketEscalation[]; feedback: TicketFeedback | null };
+export type TicketStats = { total_open: number; unassigned: number; in_progress: number; waiting_for_customer: number; resolved: number; sla_breached: number; escalated: number; average_feedback: number | null };
+export type TicketOptions = { categories: ServiceCategory[]; agents: Array<{id: string; label: string}>; customers: Array<{id: string; label: string; secondary: string | null}>; tenants: Array<{id: string; label: string; secondary: string | null}>; projects: Array<{id: string; label: string}>; units: Array<{id: string; label: string; project_id: string}> };
 
 export function permissionGranted(granted: string[], required: string): boolean {
   if (granted.includes(required)) return true;

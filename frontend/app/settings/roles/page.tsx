@@ -4,6 +4,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 
 import { AppShell } from "@/components/app-shell";
 import { useAuth } from "@/components/auth-provider";
+import { useConfirmDialog } from "@/components/confirm-dialog";
 import { SettingsNavigation } from "@/components/settings-navigation";
 import {
   apiRequest,
@@ -24,6 +25,7 @@ function errorMessage(reason: unknown): string {
 
 export default function RolesPage() {
   const { session } = useAuth();
+  const confirmDialog = useConfirmDialog();
   const [roles, setRoles] = useState<Role[]>([]);
   const [permissions, setPermissions] = useState<Permission[]>([]);
   const [users, setUsers] = useState<UserAccess[]>([]);
@@ -158,7 +160,7 @@ export default function RolesPage() {
 
   async function removeRole() {
     if (!selectedRole || selectedRole.is_system || !canDelete) return;
-    if (!window.confirm(`Delete the “${selectedRole.name}” role?`)) return;
+    if (!(await confirmDialog({ title: "Delete role?", message: `${selectedRole.name} will be permanently removed. Roles assigned to users cannot be deleted.`, confirmLabel: "Delete role", tone: "danger" }))) return;
     setSubmitting(true);
     setError(null);
     try {

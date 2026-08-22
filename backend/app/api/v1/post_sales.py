@@ -3,7 +3,8 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import FileResponse
 
-from app.api.dependencies import DbSession, SecurityContext, require_permissions
+from app.api.dependencies import DbSession, SecurityContext, mutation_context, require_permissions
+from app.core.responses import private_file_response
 from app.models.entities import Cancellation, UnitTransfer
 from app.models.enums import WorkflowStatus
 from app.schemas.organization import Page
@@ -48,12 +49,7 @@ Approver = Annotated[
 
 
 def _context(request: Request, security: SecurityContext) -> MutationContext:
-    return MutationContext(
-        actor_user_id=security.user.id,
-        permissions=security.permissions,
-        request_id=request.state.request_id,
-        ip_address=request.client.host if request.client else None,
-    )
+    return mutation_context(request, security)
 
 
 @router.get("/stats", response_model=PostSalesStats)
@@ -150,7 +146,7 @@ async def cancellation_document(
     path, filename = await service.document_path(
         db, context.organization_id, "cancellations", cancellation_id
     )
-    return FileResponse(path, media_type="application/pdf", filename=filename)
+    return private_file_response(path, filename=filename, media_type="application/pdf")
 
 
 @router.get("/transfers", response_model=Page[UnitTransferView])
@@ -231,4 +227,4 @@ async def transfer_document(transfer_id: str, db: DbSession, context: Reader) ->
     path, filename = await service.document_path(
         db, context.organization_id, "transfers", transfer_id
     )
-    return FileResponse(path, media_type="application/pdf", filename=filename)
+    return private_file_response(path, filename=filename, media_type="application/pdf")

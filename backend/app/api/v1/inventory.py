@@ -3,7 +3,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Request
 
-from app.api.dependencies import DbSession, SecurityContext, require_permissions
+from app.api.dependencies import DbSession, SecurityContext, mutation_context, require_permissions
 from app.core.errors import AppError
 from app.models.enums import BookingStatus, HoldStatus, HoldType, ProjectStatus, UnitStatus
 from app.schemas.inventory import (
@@ -58,12 +58,7 @@ BookingUpdater = Annotated[
 
 
 def _context(request: Request, security: SecurityContext) -> MutationContext:
-    return MutationContext(
-        actor_user_id=security.user.id,
-        permissions=security.permissions,
-        request_id=request.state.request_id,
-        ip_address=request.client.host if request.client else None,
-    )
+    return mutation_context(request, security)
 
 
 @router.get("/projects", response_model=Page[ProjectView])

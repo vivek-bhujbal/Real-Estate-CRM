@@ -15,7 +15,18 @@ from app.models.crm import (
 )
 from app.models.enums import BookingStatus, LeadStatus, UnitStatus
 from app.models.inventory import Floor, PriceList, Project, Tower, Unit, UnitHold
-from app.models.operations import AuditLog, Maintenance, Notification, ServiceRequest
+from app.models.operations import (
+    AuditLog,
+    Maintenance,
+    Notification,
+    ServiceRequest,
+    ServiceRequestAttachment,
+    ServiceRequestCategory,
+    ServiceRequestComment,
+    ServiceRequestEscalation,
+    ServiceRequestFeedback,
+    ServiceSLAPolicy,
+)
 from app.models.organization import (
     Branch,
     Department,
@@ -54,7 +65,17 @@ from app.models.post_sales import (
     PostBookingCase,
     SnagItem,
 )
-from app.models.rentals import Lease, RentalInvoice, RentPayment, Tenant
+from app.models.rentals import (
+    Lease,
+    LeaseDocument,
+    LeaseMove,
+    LeaseRenewal,
+    RentalInvoice,
+    RentalProperty,
+    RentPayment,
+    RentScheduleItem,
+    Tenant,
+)
 from app.models.revenue import (
     Agreement,
     Cancellation,
@@ -125,6 +146,9 @@ __all__ = [
     "LeadStatus",
     "LostLeadReason",
     "Lease",
+    "LeaseDocument",
+    "LeaseMove",
+    "LeaseRenewal",
     "Maintenance",
     "Notification",
     "NoDuesCertificate",
@@ -153,10 +177,18 @@ __all__ = [
     "RefreshToken",
     "Refund",
     "RentalInvoice",
+    "RentalProperty",
     "RentPayment",
+    "RentScheduleItem",
     "Role",
     "RolePermission",
     "ServiceRequest",
+    "ServiceRequestAttachment",
+    "ServiceRequestCategory",
+    "ServiceRequestComment",
+    "ServiceRequestEscalation",
+    "ServiceRequestFeedback",
+    "ServiceSLAPolicy",
     "SiteVisit",
     "SiteVisitUnit",
     "SnagItem",

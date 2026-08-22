@@ -2,7 +2,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Request
 
-from app.api.dependencies import DbSession, SecurityContext, require_permissions
+from app.api.dependencies import DbSession, SecurityContext, mutation_context, require_permissions
 from app.models.enums import CustomerStatus
 from app.schemas.customers import (
     Customer360View,
@@ -37,12 +37,7 @@ ActivityDeleter = Annotated[
 
 
 def _context(request: Request, security: SecurityContext) -> MutationContext:
-    return MutationContext(
-        actor_user_id=security.user.id,
-        permissions=security.permissions,
-        request_id=request.state.request_id,
-        ip_address=request.client.host if request.client else None,
-    )
+    return mutation_context(request, security)
 
 
 @router.get("/stats", response_model=CustomerStats)

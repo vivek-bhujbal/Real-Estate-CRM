@@ -3,7 +3,8 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, File, Query, Request, UploadFile
 from fastapi.responses import FileResponse
 
-from app.api.dependencies import DbSession, SecurityContext, require_permissions
+from app.api.dependencies import DbSession, SecurityContext, mutation_context, require_permissions
+from app.core.responses import private_file_response
 from app.models.entities import PartnerAgreement, PartnerDocument
 from app.models.enums import PartnerStatus
 from app.schemas.organization import Page
@@ -58,12 +59,7 @@ CommissionApprover = Annotated[
 
 
 def _context(request: Request, security: SecurityContext) -> MutationContext:
-    return MutationContext(
-        actor_user_id=security.user.id,
-        permissions=security.permissions,
-        request_id=request.state.request_id,
-        ip_address=request.client.host if request.client else None,
-    )
+    return mutation_context(request, security)
 
 
 @router.get("", response_model=Page[PartnerSummary])
@@ -244,7 +240,7 @@ async def download_document(
     path, filename, content_type = await service.prepare_document_download(
         db, context.organization_id, document_id
     )
-    return FileResponse(path, filename=filename, media_type=content_type)
+    return private_file_response(path, filename=filename, media_type=content_type)
 
 
 @router.post("/{partner_id}/lifecycle/documents-complete", response_model=PartnerDetail)
@@ -302,7 +298,7 @@ async def download_agreement(
     path, filename = await service.prepare_agreement_download(
         db, context.organization_id, agreement_id
     )
-    return FileResponse(path, filename=filename, media_type="application/pdf")
+    return private_file_response(path, filename=filename, media_type="application/pdf")
 
 
 @router.post("/{partner_id}/commission-structures", response_model=PartnerDetail, status_code=201)

@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
+import { connection } from "next/server";
 
 import { AuthProvider } from "@/components/auth-provider";
+import { ConfirmDialogProvider } from "@/components/confirm-dialog";
 
 import "./globals.css";
 
@@ -10,11 +12,13 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false }
 };
 
-export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+  // Nonce-based CSP requires request-time rendering so Next can attach the proxy nonce.
+  await connection();
   return (
     <html lang="en">
       <body>
-        <AuthProvider>{children}</AuthProvider>
+        <AuthProvider><ConfirmDialogProvider>{children}</ConfirmDialogProvider></AuthProvider>
       </body>
     </html>
   );

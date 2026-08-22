@@ -7,7 +7,11 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.core.authorization import PERMISSION_CATALOG, ROLE_TEMPLATES
+from app.core.authorization import (
+    PERMISSION_CATALOG,
+    PORTAL_ROLE_PERMISSION_ALLOWLIST,
+    ROLE_TEMPLATES,
+)
 from app.core.config import get_settings
 from app.core.errors import AppError
 from app.core.security import (
@@ -78,6 +82,38 @@ async def permission_codes(db: AsyncSession, user: User) -> list[str]:
     return list((await db.scalars(statement)).all())
 
 
+async def effective_permission_codes(db: AsyncSession, user: User) -> list[str]:
+    """Return permissions after applying row-identity safety boundaries.
+
+    The built-in buyer, tenant and broker roles are portal roles. A portal-only
+    account must never inherit organization-wide reads merely because the role
+    catalog contains a module ``view`` permission. Staff/custom role assignment
+    intentionally lifts this boundary; the custom/staff role remains subject to
+    the normal permission checks and organization scoping.
+    """
+    roles = set(
+        (
+            await db.scalars(
+                select(Role.name)
+                .join(
+                    UserRole,
+                    (UserRole.organization_id == Role.organization_id)
+                    & (UserRole.role_id == Role.id),
+                )
+                .where(
+                    UserRole.organization_id == user.organization_id,
+                    UserRole.user_id == user.id,
+                )
+            )
+        ).all()
+    )
+    granted = set(await permission_codes(db, user))
+    if roles and roles.issubset(PORTAL_ROLE_PERMISSION_ALLOWLIST):
+        safe = set().union(*(PORTAL_ROLE_PERMISSION_ALLOWLIST[name] for name in roles))
+        granted.intersection_update(safe)
+    return sorted(granted)
+
+
 async def current_user_view(db: AsyncSession, user: User) -> CurrentUserView:
     organization = user.organization
     return CurrentUserView(
@@ -90,7 +126,7 @@ async def current_user_view(db: AsyncSession, user: User) -> CurrentUserView:
         is_active=user.is_active,
         created_at=user.created_at,
         organization=OrganizationView.model_validate(organization),
-        permissions=await permission_codes(db, user),
+        permissions=await effective_permission_codes(db, user),
     )
 
 
@@ -172,6 +208,8 @@ async def register_organization(
             new_value={"name": organization.name, "slug": organization.slug},
             request_id=request_id,
             ip_address=ip_address,
+            user_agent=user_agent[:512] if user_agent else None,
+            device_metadata=None,
             created_at=_db_now(),
         )
     )

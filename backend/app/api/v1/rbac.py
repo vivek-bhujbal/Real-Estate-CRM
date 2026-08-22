@@ -2,7 +2,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Request
 
-from app.api.dependencies import DbSession, SecurityContext, require_permissions
+from app.api.dependencies import DbSession, SecurityContext, mutation_context, require_permissions
 from app.schemas.rbac import (
     PermissionView,
     RoleCreate,
@@ -58,6 +58,7 @@ async def create_role(
     db: DbSession,
     context: RolesCreator,
 ) -> RoleView:
+    audit = mutation_context(request, context)
     return await rbac_service.create_role(
         db,
         context.organization_id,
@@ -66,6 +67,8 @@ async def create_role(
         context.permissions,
         request_id=request.state.request_id,
         ip_address=_client_ip(request),
+        user_agent=audit.user_agent,
+        device_metadata=audit.device_metadata,
     )
 
 
@@ -77,6 +80,7 @@ async def update_role(
     db: DbSession,
     context: RolesUpdater,
 ) -> RoleView:
+    audit = mutation_context(request, context)
     return await rbac_service.update_role(
         db,
         context.organization_id,
@@ -86,6 +90,8 @@ async def update_role(
         context.permissions,
         request_id=request.state.request_id,
         ip_address=_client_ip(request),
+        user_agent=audit.user_agent,
+        device_metadata=audit.device_metadata,
     )
 
 
@@ -96,6 +102,7 @@ async def delete_role(
     db: DbSession,
     context: RolesDeleter,
 ) -> None:
+    audit = mutation_context(request, context)
     await rbac_service.delete_role(
         db,
         context.organization_id,
@@ -103,6 +110,8 @@ async def delete_role(
         role_id,
         request_id=request.state.request_id,
         ip_address=_client_ip(request),
+        user_agent=audit.user_agent,
+        device_metadata=audit.device_metadata,
     )
 
 
@@ -114,6 +123,7 @@ async def replace_user_roles(
     db: DbSession,
     context: AssignmentManager,
 ) -> UserRoleView:
+    audit = mutation_context(request, context)
     return await rbac_service.replace_user_roles(
         db,
         context.organization_id,
@@ -123,4 +133,6 @@ async def replace_user_roles(
         context.permissions,
         request_id=request.state.request_id,
         ip_address=_client_ip(request),
+        user_agent=audit.user_agent,
+        device_metadata=audit.device_metadata,
     )

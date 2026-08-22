@@ -3,11 +3,21 @@
 import asyncio
 import logging
 import os
+from pathlib import Path
 
+from app.core.logging import configure_logging
 from app.db.session import SessionFactory, engine
 from app.services.inventory import expire_due_holds
 
 logger = logging.getLogger(__name__)
+HEARTBEAT_PATH = Path(
+    os.getenv("UNIT_HOLD_EXPIRY_HEARTBEAT_PATH", "/tmp/unit-hold-expiry.heartbeat")
+)
+
+
+def _write_heartbeat() -> None:
+    """Record only successful cycles so Docker can detect a stalled/broken worker."""
+    HEARTBEAT_PATH.touch()
 
 
 async def run_once() -> int:
@@ -21,12 +31,13 @@ async def run_once() -> int:
 
 
 async def main() -> None:
-    logging.basicConfig(level=logging.INFO)
+    configure_logging()
     interval = max(5, int(os.getenv("UNIT_HOLD_EXPIRY_INTERVAL_SECONDS", "30")))
     try:
         while True:
             try:
                 expired = await run_once()
+                _write_heartbeat()
                 if expired:
                     logger.info("Expired %s unit holds", expired)
             except Exception:

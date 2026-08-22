@@ -26,7 +26,7 @@ from app.models.entities import (
     SiteVisit,
     User,
 )
-from app.models.enums import ActivityType, CustomerStatus, LeadStatus
+from app.models.enums import ActivityType, CustomerStatus, LeadStatus, NotificationEventType
 from app.schemas.leads import (
     AgeingBucket,
     AssigneeView,
@@ -65,6 +65,7 @@ from app.schemas.leads import (
     TimelineItem,
 )
 from app.schemas.organization import Page
+from app.services.notifications import queue_in_app
 from app.services.organization import MutationContext
 
 ACTIVE_LEAD_STATUSES = (
@@ -192,6 +193,8 @@ def _audit(
         new_value=new_value,
         request_id=context.request_id,
         ip_address=context.ip_address,
+        user_agent=context.user_agent,
+        device_metadata=context.device_metadata,
         created_at=_now(),
     )
 
@@ -868,6 +871,18 @@ async def create_lead(
                 active_lead_key=lead.id,
             )
         )
+        queue_in_app(
+            db,
+            organization_id=lead.organization_id,
+            recipient_user_ids=[payload.owner_user_id],
+            event_type=NotificationEventType.LEAD_ASSIGNED,
+            title="Lead assigned to you",
+            body=lead.full_name,
+            related_entity_type="lead",
+            related_entity_id=lead.id,
+            action_url=f"/leads/{lead.id}",
+            data={"lead_id": lead.id, "assigned_by_user_id": context.actor_user_id},
+        )
     await _recompute_score(db, lead)
     db.add(
         _audit(
@@ -1109,6 +1124,18 @@ async def _set_assignment(
                 is_active=True,
                 active_lead_key=lead.id,
             )
+        )
+        queue_in_app(
+            db,
+            organization_id=lead.organization_id,
+            recipient_user_ids=[assigned_user_id],
+            event_type=NotificationEventType.LEAD_ASSIGNED,
+            title="Lead assigned to you",
+            body=lead.full_name,
+            related_entity_type="lead",
+            related_entity_id=lead.id,
+            action_url=f"/leads/{lead.id}",
+            data={"lead_id": lead.id, "assigned_by_user_id": actor_user_id},
         )
     lead.updated_at = now
 

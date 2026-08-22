@@ -1,14 +1,12 @@
 from datetime import UTC, date, datetime
 from decimal import ROUND_HALF_UP, Decimal
 from math import ceil
-from pathlib import Path
 from typing import Any, cast
 
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import get_settings
 from app.core.errors import AppError
 from app.documents.workflow_pdf import WorkflowPdfDocument, WorkflowPdfRenderer
 from app.models.entities import (
@@ -60,7 +58,7 @@ from app.schemas.post_sales import (
     WorkflowDecision,
 )
 from app.services.organization import MutationContext
-from app.storage.local import LocalStorage
+from app.storage import StoredFile, get_storage
 
 ZERO = Decimal("0.00")
 MONEY = Decimal("0.01")
@@ -102,6 +100,8 @@ def _audit(
         new_value=after,
         request_id=context.request_id,
         ip_address=context.ip_address,
+        user_agent=context.user_agent,
+        device_metadata=context.device_metadata,
         created_at=_now(),
     )
 
@@ -188,7 +188,7 @@ async def _save_document(
         )
     )
     key = f"{org}/post-sales/{kind}/{workflow_id}/{number}.pdf"
-    await LocalStorage(get_settings().storage_local_path).save_bytes(key=key, content=content)
+    await get_storage().save_bytes(key=key, content=content)
     return key
 
 
@@ -1217,7 +1217,7 @@ async def complete_transfer(
 
 async def document_path(
     db: AsyncSession, org: str, kind: str, workflow_id: str
-) -> tuple[Path, str]:
+) -> tuple[StoredFile, str]:
     if kind == "cancellations":
         item: Cancellation | UnitTransfer = await _entity(db, Cancellation, org, workflow_id)
     else:
@@ -1225,9 +1225,7 @@ async def document_path(
     if not item.document_storage_key or not item.document_number:
         raise _error("DOCUMENT_NOT_READY", "Workflow document has not been generated", 404)
     try:
-        path = await LocalStorage(get_settings().storage_local_path).path_for_read(
-            key=item.document_storage_key
-        )
+        path = await get_storage().path_for_read(key=item.document_storage_key)
     except FileNotFoundError as exc:
         raise _error("DOCUMENT_NOT_FOUND", "Workflow document is unavailable", 404) from exc
     return path, f"{item.document_number}.pdf"

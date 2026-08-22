@@ -40,6 +40,7 @@ from app.models.enums import (
     HoldStatus,
     InstallmentStatus,
     LedgerEntryType,
+    NotificationEventType,
     PartnerStatus,
     PaymentStatus,
     QuotationStatus,
@@ -72,6 +73,7 @@ from app.schemas.bookings import (
     PaymentPlanView,
 )
 from app.schemas.organization import Page
+from app.services import notifications as notification_service
 from app.services.documents import expire_due_documents
 from app.services.organization import MutationContext
 
@@ -106,6 +108,8 @@ def _audit(
         new_value=new_value,
         request_id=context.request_id,
         ip_address=context.ip_address,
+        user_agent=context.user_agent,
+        device_metadata=context.device_metadata,
         created_at=_now(),
     )
 
@@ -728,6 +732,18 @@ async def create_booking(
             },
         )
     )
+    notification_service.queue_in_app(
+        db,
+        organization_id=organization_id,
+        recipient_user_ids={booking.booked_by_user_id, booking.salesperson_user_id or ""},
+        event_type=NotificationEventType.BOOKING_CREATED,
+        title="Booking created",
+        body=f"{booking.booking_number} · {booking.currency} {booking.booking_amount}",
+        related_entity_type="booking",
+        related_entity_id=booking.id,
+        action_url=f"/bookings/{booking.id}",
+        data={"booking_number": booking.booking_number, "status": booking.status.value},
+    )
     try:
         await db.commit()
     except IntegrityError as exc:
@@ -874,6 +890,18 @@ async def advance_booking(
             {"status": before},
             {"status": target.value},
         )
+    )
+    notification_service.queue_in_app(
+        db,
+        organization_id=organization_id,
+        recipient_user_ids={booking.booked_by_user_id, booking.salesperson_user_id or ""},
+        event_type=NotificationEventType.BOOKING_STATUS_CHANGED,
+        title="Booking status updated",
+        body=f"{booking.booking_number}: {before} → {target.value}",
+        related_entity_type="booking",
+        related_entity_id=booking.id,
+        action_url=f"/bookings/{booking.id}",
+        data={"previous_status": before, "status": target.value},
     )
     await db.commit()
     await db.refresh(booking)
@@ -1160,6 +1188,19 @@ async def decide_payment(
             {"status": payment.status.value, "booking_id": booking.id, "notes": payload.notes},
         )
     )
+    if payment.status == PaymentStatus.COMPLETED:
+        notification_service.queue_in_app(
+            db,
+            organization_id=organization_id,
+            recipient_user_ids={booking.booked_by_user_id, booking.salesperson_user_id or ""},
+            event_type=NotificationEventType.PAYMENT_RECEIVED,
+            title="Payment received",
+            body=f"{payment.currency} {payment.amount} received for {booking.booking_number}",
+            related_entity_type="payment",
+            related_entity_id=payment.id,
+            action_url=f"/bookings/{booking.id}",
+            data={"booking_id": booking.id, "amount": str(payment.amount)},
+        )
     await db.commit()
     await db.refresh(booking)
     return await _booking_view(db, organization_id, booking)
@@ -1290,6 +1331,18 @@ async def request_approval(
             },
         )
     )
+    notification_service.queue_in_app(
+        db,
+        organization_id=organization_id,
+        recipient_user_ids=payload.approver_user_ids,
+        event_type=NotificationEventType.BOOKING_STATUS_CHANGED,
+        title="Booking approval requested",
+        body=booking.booking_number,
+        related_entity_type="booking",
+        related_entity_id=booking.id,
+        action_url=f"/bookings/{booking.id}",
+        data={"status": booking.status.value, "requested_by_user_id": context.actor_user_id},
+    )
     await db.commit()
     await db.refresh(booking)
     return await _booking_view(db, organization_id, booking)
@@ -1374,6 +1427,18 @@ async def decide_approval(
             {"status": ApprovalStatus.PENDING.value},
             {"status": approval.status.value, "booking_status": booking.status.value},
         )
+    )
+    notification_service.queue_in_app(
+        db,
+        organization_id=organization_id,
+        recipient_user_ids={booking.booked_by_user_id, booking.salesperson_user_id or ""},
+        event_type=NotificationEventType.BOOKING_STATUS_CHANGED,
+        title="Booking approval updated",
+        body=f"{booking.booking_number}: {booking.status.value}",
+        related_entity_type="booking",
+        related_entity_id=booking.id,
+        action_url=f"/bookings/{booking.id}",
+        data={"approval_status": approval.status.value, "booking_status": booking.status.value},
     )
     await db.commit()
     await db.refresh(booking)

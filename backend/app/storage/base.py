@@ -1,5 +1,12 @@
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
+
+
+@dataclass(frozen=True, slots=True)
+class StoredFile:
+    path: Path
+    temporary: bool = False
 
 
 class Storage(Protocol):
@@ -9,4 +16,4 @@ class Storage(Protocol):
 
     async def delete(self, *, key: str) -> None: ...
 
-    async def path_for_read(self, *, key: str) -> Path: ...
+    async def path_for_read(self, *, key: str) -> StoredFile: ...

@@ -4,6 +4,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 
 import { AppShell } from "@/components/app-shell";
 import { useAuth } from "@/components/auth-provider";
+import { useConfirmDialog } from "@/components/confirm-dialog";
 import { QuotationNavigation } from "@/components/quotation-navigation";
 import { apiRequest, ApiError, ApprovalMatrixOptions, PageResponse, permissionGranted, PriceList, Project, RecordStatus } from "@/lib/api";
 
@@ -13,6 +14,7 @@ const message = (reason: unknown) => reason instanceof ApiError ? reason.message
 const parse = (value: string, label: string) => { try { return JSON.parse(value); } catch { throw new Error(`${label} must contain valid JSON`); } };
 
 export default function PriceListsPage() {
+  const confirmDialog = useConfirmDialog();
   const { session } = useAuth(); const permissions = useMemo(() => session?.user.permissions ?? [], [session]);
   const [result, setResult] = useState<PageResponse<PriceList> | null>(null); const [projects, setProjects] = useState<Project[]>([]);
   const [approvalOptions, setApprovalOptions] = useState<ApprovalMatrixOptions>({ users: [], roles: [] });
@@ -37,7 +39,7 @@ export default function PriceListsPage() {
     setDraft(empty); setEditingId(null); setOpen(false); setNotice(editingId ? "Draft price list updated" : "Price list created as draft"); setRefresh((value) => value + 1);
   } catch (reason) { setError(reason instanceof Error ? reason.message : message(reason)); } finally { setSaving(false); } }
   async function setRecordStatus(item: PriceList, next: RecordStatus) { try { await apiRequest(`/price-lists/${item.id}/status`, { method: "POST", body: JSON.stringify({ status: next }) }); setNotice(`${item.name} is now ${next.toLowerCase()}`); setRefresh((value) => value + 1); } catch (reason) { setError(message(reason)); } }
-  async function remove(item: PriceList) { if (!confirm(`Delete draft price list ${item.name}?`)) return; try { await apiRequest(`/price-lists/${item.id}`, { method: "DELETE" }); setRefresh((value) => value + 1); } catch (reason) { setError(message(reason)); } }
+  async function remove(item: PriceList) { if (!(await confirmDialog({ title: "Delete draft price list?", message: `${item.name} will be permanently removed. Active price lists cannot be deleted.`, confirmLabel: "Delete draft", tone: "danger" }))) return; try { await apiRequest(`/price-lists/${item.id}`, { method: "DELETE" }); setRefresh((value) => value + 1); } catch (reason) { setError(message(reason)); } }
   function edit(item: PriceList) { const rules = item.pricing_rules; setEditingId(item.id); setDraft({ project_id: item.project_id, name: item.name, code: item.code, currency: item.currency, effective_from: item.effective_from, effective_to: item.effective_to ?? "", base_rate: rules.base_rate_per_sqft ?? "", floor_start: rules.floor_rise ? String(rules.floor_rise.start_floor) : "", floor_amount: rules.floor_rise?.amount_per_floor ?? "", floor_sqft_rate: rules.floor_rise?.rate_per_sqft_per_floor ?? "", self_limit: rules.discount_policy.self_approval_limit_percent, maximum_discount: rules.discount_policy.maximum_discount_percent ?? "", booking_kind: rules.booking_amount?.calculation ?? "", booking_value: rules.booking_amount?.value ?? "", premiums: JSON.stringify(rules.premiums, null, 2), parking: JSON.stringify(rules.parking_options, null, 2), amenities: JSON.stringify(rules.amenity_charges, null, 2), charges: JSON.stringify(rules.charges, null, 2), taxes: JSON.stringify(rules.taxes, null, 2), overrides: JSON.stringify(rules.unit_overrides, null, 2), approval_matrix: JSON.stringify(rules.discount_policy.approval_matrix ?? [], null, 2) }); setOpen(true); window.scrollTo({ top: 0, behavior: "smooth" }); }
   const set = (key: keyof Draft, value: string) => setDraft((current) => ({ ...current, [key]: value }));
   return <AppShell><main className="dashboard-content quote-content"><div className="management-heading"><div><p className="overline">Pricing control</p><h1>Price lists</h1><p>Every commercial amount comes from a versioned project configuration or its unit record.</p></div>{canCreate && <button className="button button-primary" onClick={() => { setEditingId(null); setDraft(empty); setOpen((value) => !value); }}>{open ? "Close editor" : "Create price list"}</button>}</div><QuotationNavigation />

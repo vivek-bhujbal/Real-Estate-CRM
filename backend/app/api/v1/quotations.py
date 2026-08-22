@@ -4,7 +4,8 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import StreamingResponse
 
-from app.api.dependencies import DbSession, SecurityContext, require_permissions
+from app.api.dependencies import DbSession, SecurityContext, mutation_context, require_permissions
+from app.core.responses import PRIVATE_FILE_HEADERS
 from app.documents.quotation_pdf import (
     BasicQuotationPdfRenderer,
     QuotationPdfDocument,
@@ -41,12 +42,7 @@ QuotationExporter = Annotated[SecurityContext, Depends(require_permissions("quot
 
 
 def _context(request: Request, security: SecurityContext) -> MutationContext:
-    return MutationContext(
-        actor_user_id=security.user.id,
-        permissions=security.permissions,
-        request_id=request.state.request_id,
-        ip_address=request.client.host if request.client else None,
-    )
+    return mutation_context(request, security)
 
 
 @router.get("/price-lists", response_model=Page[PriceListView])
@@ -304,5 +300,8 @@ async def quotation_pdf(
     return StreamingResponse(
         BytesIO(content),
         media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={
+            **PRIVATE_FILE_HEADERS,
+            "Content-Disposition": f'attachment; filename="{filename}"',
+        },
     )

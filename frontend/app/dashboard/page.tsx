@@ -1,35 +1,124 @@
 "use client";
 
-import Link from "next/link";
-import { useEffect, useState } from "react";
+import { CSSProperties, useCallback, useEffect, useState } from "react";
 
 import { AppShell } from "@/components/app-shell";
 import { useAuth } from "@/components/auth-provider";
-import { apiRequest, ApiError, permissionGranted } from "@/lib/api";
+import {
+  apiRequest,
+  ApiError,
+  DashboardCatalog,
+  DashboardChart,
+  DashboardKind,
+  DashboardMetricFormat,
+  DashboardView,
+} from "@/lib/api";
 
-type Summary = { leads: number; projects: number; available_units: number; bookings: number };
+function formatValue(value: string, format: DashboardMetricFormat, currency: string | null) {
+  const number = Number(value);
+  if (format === "PERCENT") {
+    return `${new Intl.NumberFormat("en-IN", { maximumFractionDigits: 2 }).format(number)}%`;
+  }
+  if (format === "CURRENCY" && currency && /^[A-Z]{3}$/.test(currency)) {
+    return new Intl.NumberFormat("en-IN", {
+      style: "currency",
+      currency,
+      maximumFractionDigits: 0,
+    }).format(number);
+  }
+  return new Intl.NumberFormat("en-IN", {
+    maximumFractionDigits: format === "CURRENCY" ? 2 : 0,
+  }).format(number);
+}
 
-const metrics = [
-  { key: "leads", label: "Active leads", detail: "Across your sales pipeline" },
-  { key: "projects", label: "Projects", detail: "Visible to your workspace" },
-  { key: "available_units", label: "Available units", detail: "Ready for matching" },
-  { key: "bookings", label: "Bookings", detail: "All booking stages" }
-] as const;
+function DashboardChartCard({ chart, currency }: { chart: DashboardChart; currency: string | null }) {
+  const values = chart.points.map((point) => Number(point.value));
+  const maximum = Math.max(...values, 0);
+  const hasData = chart.points.length > 0 && values.some((value) => value !== 0);
+
+  return (
+    <article className="panel analytics-chart-card">
+      <div className="panel-heading">
+        <div><h2>{chart.title}</h2><p>{chart.description}</p></div>
+        <span className="status-pill">Database</span>
+      </div>
+      {!hasData ? (
+        <div className="dashboard-empty-chart">
+          <div className="empty-chart-grid" aria-hidden="true"><i /><i /><i /><i /></div>
+          <div className="empty-state compact">
+            <span className="empty-icon" aria-hidden="true">0</span>
+            <h3>No recorded data</h3>
+            <p>{chart.empty_message}</p>
+          </div>
+        </div>
+      ) : (
+        <div className="analytics-bars" role="img" aria-label={`${chart.description}. ${chart.points.map((point) => `${point.label}: ${formatValue(point.value, chart.format, currency)}`).join(", ")}`}>
+          {chart.points.map((point) => {
+            const numericValue = Number(point.value);
+            const height = maximum > 0 ? Math.max((numericValue / maximum) * 100, numericValue ? 3 : 0) : 0;
+            const style = { "--bar-height": `${height}%` } as CSSProperties;
+            return (
+              <div className="analytics-bar-column" key={point.label}>
+                <div className="analytics-bar-value">
+                  <strong>{formatValue(point.value, chart.format, currency)}</strong>
+                  {point.total !== null && <small>of {Number(point.total).toLocaleString("en-IN")}</small>}
+                </div>
+                <div className="analytics-bar-track"><span style={style} /></div>
+                <small title={point.label}>{point.label}</small>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </article>
+  );
+}
 
 export default function DashboardPage() {
   const { session } = useAuth();
-  const [summary, setSummary] = useState<Summary | null>(null);
+  const [catalog, setCatalog] = useState<DashboardCatalog | null>(null);
+  const [selected, setSelected] = useState<DashboardKind | null>(null);
+  const [view, setView] = useState<DashboardView | null>(null);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const canCreateLead = permissionGranted(session?.user.permissions ?? [], "leads.create");
 
   useEffect(() => {
     if (!session) return;
     let active = true;
-    void apiRequest<Summary>("/dashboard/summary")
-      .then((data) => active && setSummary(data))
-      .catch((reason) => active && setError(reason instanceof ApiError ? reason.message : "Dashboard data is unavailable"));
+    void apiRequest<DashboardCatalog>("/dashboard/catalog")
+      .then((result) => {
+        if (!active) return;
+        setCatalog(result);
+        setSelected(result.default_dashboard);
+        setError(null);
+        if (!result.default_dashboard) setLoading(false);
+      })
+      .catch((reason) => {
+        if (!active) return;
+        setError(reason instanceof ApiError ? reason.message : "Dashboard catalog is unavailable");
+        setLoading(false);
+      });
     return () => { active = false; };
   }, [session]);
+
+  const loadDashboard = useCallback(async (kind: DashboardKind) => {
+    setLoading(true);
+    try {
+      const result = await apiRequest<DashboardView>(`/dashboard/${kind}`);
+      setView(result);
+      setError(null);
+    } catch (reason) {
+      setError(reason instanceof ApiError ? reason.message : "Dashboard data is unavailable");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!selected) return;
+    const timer = setTimeout(() => void loadDashboard(selected), 0);
+    return () => clearTimeout(timer);
+  }, [loadDashboard, selected]);
 
   if (!session) {
     return <main className="center-page" aria-busy="true"><span className="spinner" /><span>Loading workspace…</span></main>;
@@ -37,46 +126,60 @@ export default function DashboardPage() {
 
   return (
     <AppShell>
-      <main className="dashboard-content">
-        <div className="page-heading">
-          <div><p className="overline">Workspace overview</p><h1>Good to see you, {session.user.full_name.split(" ")[0]}</h1><p>Here is the current picture from your organization’s records.</p></div>
-          {canCreateLead && <Link className="button button-primary" href="/leads/create">Add lead</Link>}
+      <main className="dashboard-content analytics-dashboard">
+        <div className="page-heading analytics-heading">
+          <div>
+            <p className="overline">Live business intelligence</p>
+            <h1>{view?.title ?? `Welcome, ${session.user.full_name.split(" ")[0]}`}</h1>
+            <p>{view?.description ?? "Select an authorized dashboard to inspect your organization’s recorded data."}</p>
+          </div>
+          {selected && <button className="button button-secondary" disabled={loading} onClick={() => void loadDashboard(selected)}>{loading ? "Refreshing…" : "Refresh data"}</button>}
         </div>
 
         {error && <div className="alert alert-error" role="alert">{error}</div>}
 
-        <section className="metrics" aria-label="Organization summary">
-          {metrics.map((metric) => (
-            <article className="metric" key={metric.key}>
-              <div className="metric-top"><span>{metric.label}</span><span className="metric-dot" aria-hidden="true" /></div>
-              {summary ? <strong>{summary[metric.key].toLocaleString()}</strong> : <span className="skeleton skeleton-number" />}
-              <p>{metric.detail}</p>
-            </article>
-          ))}
-        </section>
+        {catalog && catalog.items.length > 0 && (
+          <nav className="dashboard-switcher" aria-label="Dashboard views">
+            {catalog.items.map((item) => (
+              <button
+                className={selected === item.kind ? "active" : ""}
+                aria-pressed={selected === item.kind}
+                key={item.kind}
+                onClick={() => { setView(null); setSelected(item.kind); }}
+                title={item.description}
+              >
+                <span>{item.label}</span><small>{item.kind === catalog.default_dashboard ? "Default" : "View"}</small>
+              </button>
+            ))}
+          </nav>
+        )}
 
-        <section className="dashboard-grid">
-          <article className="panel pipeline-panel">
-            <div className="panel-heading"><div><h2>Sales pipeline</h2><p>Lead movement will appear as your team begins working.</p></div><span className="status-pill">Live data</span></div>
-            {summary && summary.leads === 0 ? (
-              <div className="empty-state compact"><span className="empty-icon" aria-hidden="true">↗</span><h3>No leads yet</h3><p>Create your first genuine lead to start tracking qualification and conversion.</p></div>
-            ) : !summary ? <div className="panel-skeleton"><span className="skeleton"/><span className="skeleton"/><span className="skeleton"/></div> : null}
-          </article>
-
-          <article className="panel activity-panel">
-            <div className="panel-heading"><div><h2>Recent activity</h2><p>Important organization events</p></div></div>
-            <div className="empty-state compact"><span className="empty-icon" aria-hidden="true">≡</span><h3>No activity yet</h3><p>Audited business actions will be listed here as your team gets started.</p></div>
-          </article>
-        </section>
-
-        <section className="getting-started">
-          <div><p className="overline">Getting started</p><h2>Build your operating foundation</h2><p>Your workspace is clean and ready. Future phases will unlock each setup step without adding sample records.</p></div>
-          <ol>
-            <li><span>1</span><div><strong>Configure your organization</strong><small>Add branches, departments, and project teams.</small></div><em>Next phase</em></li>
-            <li><span>2</span><div><strong>Invite your team</strong><small>Assign explicit roles and data visibility.</small></div><em>Next phase</em></li>
-            <li><span>3</span><div><strong>Add projects and inventory</strong><small>Create the units your sales team can offer.</small></div><em>Planned</em></li>
-          </ol>
-        </section>
+        {catalog && catalog.items.length === 0 ? (
+          <section className="panel dashboard-no-access">
+            <div className="empty-state compact"><span className="empty-icon" aria-hidden="true">—</span><h3>No analytics view assigned</h3><p>Your account is active, but its permissions do not include the underlying records required by any dashboard.</p></div>
+          </section>
+        ) : loading && !view ? (
+          <><section className="analytics-metrics">{Array.from({ length: 5 }, (_, index) => <article key={index}><span className="skeleton" /><span className="skeleton skeleton-number" /><span className="skeleton" /></article>)}</section><section className="analytics-chart-grid"><div className="panel panel-skeleton"><span className="skeleton" /><span className="skeleton" /><span className="skeleton" /></div><div className="panel panel-skeleton"><span className="skeleton" /><span className="skeleton" /><span className="skeleton" /></div></section></>
+        ) : view ? (
+          <>
+            <section className="analytics-metrics" aria-label={`${view.title} metrics`}>
+              {view.metrics.map((metric) => (
+                <article key={metric.key}>
+                  <div><span>{metric.label}</span><i aria-hidden="true" /></div>
+                  <strong>{formatValue(metric.value, metric.format, view.currency)}</strong>
+                  <p>{metric.detail}</p>
+                </article>
+              ))}
+            </section>
+            <section className="analytics-chart-grid">
+              {view.charts.map((chart) => <DashboardChartCard chart={chart} currency={view.currency} key={chart.key} />)}
+            </section>
+            <footer className="dashboard-provenance">
+              <span><i aria-hidden="true" /> Live database calculations</span>
+              <p>No seeded or placeholder statistics. Calculated as of {new Intl.DateTimeFormat("en-IN", { dateStyle: "medium", timeStyle: "short" }).format(new Date(view.as_of))}.</p>
+            </footer>
+          </>
+        ) : null}
       </main>
     </AppShell>
   );

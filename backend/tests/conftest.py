@@ -1,4 +1,6 @@
+import atexit
 import os
+import shutil
 import tempfile
 from collections.abc import AsyncIterator
 from itertools import count
@@ -9,7 +11,9 @@ from httpx import ASGITransport, AsyncClient
 os.environ["APP_ENV"] = "test"
 os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
 os.environ["JWT_SECRET_KEY"] = "test-secret-key-with-at-least-thirty-two-characters"
-os.environ["STORAGE_LOCAL_PATH"] = tempfile.mkdtemp(prefix="realestate-crm-test-files-")
+test_storage_path = tempfile.mkdtemp(prefix="realestate-crm-test-files-")
+os.environ["STORAGE_LOCAL_PATH"] = test_storage_path
+atexit.register(shutil.rmtree, test_storage_path, ignore_errors=True)
 
 from app.db import Base  # noqa: E402
 from app.db.session import engine  # noqa: E402

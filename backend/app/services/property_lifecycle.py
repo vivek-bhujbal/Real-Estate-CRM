@@ -3,7 +3,6 @@ import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
 from math import ceil
-from pathlib import Path
 from typing import Any
 
 from fastapi import UploadFile
@@ -11,7 +10,6 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import get_settings
 from app.core.errors import AppError
 from app.documents.workflow_pdf import WorkflowPdfDocument, WorkflowPdfRenderer
 from app.models.entities import (
@@ -45,6 +43,7 @@ from app.models.enums import (
     DocumentStatus,
     InstallmentStatus,
     LedgerEntryType,
+    NotificationEventType,
     PaymentStatus,
     PossessionStatus,
     PostBookingStage,
@@ -82,9 +81,10 @@ from app.schemas.property_lifecycle import (
     SnagDecision,
     SnagView,
 )
+from app.services import notifications as notification_service
 from app.services.documents import _prepare_file
 from app.services.organization import MutationContext
-from app.storage.local import LocalStorage
+from app.storage import StoredFile, get_storage
 
 ZERO = Decimal("0.00")
 
@@ -116,6 +116,8 @@ def _audit(
         new_value=after,
         request_id=context.request_id,
         ip_address=context.ip_address,
+        user_agent=context.user_agent,
+        device_metadata=context.device_metadata,
         created_at=_now(),
     )
 
@@ -766,7 +768,7 @@ async def upload_agreement(
     if prepared.content_type != "application/pdf":
         await asyncio.to_thread(prepared.path.unlink)
         raise _error("AGREEMENT_PDF_REQUIRED", "Agreement must be a genuine PDF", 415)
-    storage = LocalStorage(get_settings().storage_local_path)
+    storage = get_storage()
     key = f"pbl/a/{org}/{item.id}/{uuid.uuid4().hex[:16]}.private"
     old_key = item.storage_key
     try:
@@ -1014,7 +1016,7 @@ async def issue_no_dues(
         )
     )
     key = f"pbl/n/{org}/{case.id}/{uuid.uuid4().hex[:16]}.private"
-    storage = LocalStorage(get_settings().storage_local_path)
+    storage = get_storage()
     await storage.save_bytes(key=key, content=pdf)
     item = NoDuesCertificate(
         organization_id=org,
@@ -1331,6 +1333,23 @@ async def possession_action(
             },
         )
     )
+    possession_recipients = await notification_service.recipients_for_permission(
+        db, org, "possession.update"
+    )
+    if booking.salesperson_user_id:
+        possession_recipients.add(booking.salesperson_user_id)
+    notification_service.queue_in_app(
+        db,
+        organization_id=org,
+        recipient_user_ids=possession_recipients,
+        event_type=NotificationEventType.POSSESSION_UPDATED,
+        title="Possession workflow updated",
+        body=f"{booking.booking_number}: {item.status.value}",
+        related_entity_type="possession",
+        related_entity_id=item.id,
+        action_url=f"/property-lifecycle/{case.id}",
+        data={"booking_id": booking.id, "status": item.status.value, "action": action},
+    )
     await db.commit()
     return await _views(db, org, case)
 
@@ -1474,7 +1493,7 @@ async def upload_handover_document(
             "HANDOVER_DOCUMENT_SCOPE_MISMATCH", "Document does not belong to this handover", 404
         )
     prepared = await _prepare_file(upload)
-    storage = LocalStorage(get_settings().storage_local_path)
+    storage = get_storage()
     key = f"pbl/h/{org}/{item.id}/{uuid.uuid4().hex[:16]}.private"
     old_key = item.storage_key
     try:
@@ -1634,7 +1653,9 @@ async def complete_handover(
     return await _views(db, org, case)
 
 
-async def agreement_download(db: AsyncSession, org: str, case_id: str) -> tuple[Path, str, str]:
+async def agreement_download(
+    db: AsyncSession, org: str, case_id: str
+) -> tuple[StoredFile, str, str]:
     case = await _case(db, org, case_id)
     item = (
         await db.scalars(
@@ -1646,13 +1667,15 @@ async def agreement_download(db: AsyncSession, org: str, case_id: str) -> tuple[
     if not item or not item.storage_key or not item.file_name or not item.content_type:
         raise _error("AGREEMENT_FILE_MISSING", "Agreement file is unavailable", 404)
     return (
-        await LocalStorage(get_settings().storage_local_path).path_for_read(key=item.storage_key),
+        await get_storage().path_for_read(key=item.storage_key),
         item.file_name,
         item.content_type,
     )
 
 
-async def no_dues_download(db: AsyncSession, org: str, case_id: str) -> tuple[Path, str]:
+async def no_dues_download(
+    db: AsyncSession, org: str, case_id: str
+) -> tuple[StoredFile, str]:
     item = (
         await db.scalars(
             select(NoDuesCertificate).where(
@@ -1663,14 +1686,14 @@ async def no_dues_download(db: AsyncSession, org: str, case_id: str) -> tuple[Pa
     ).first()
     if not item:
         raise _error("NO_DUES_MISSING", "No-dues certificate is unavailable", 404)
-    return await LocalStorage(get_settings().storage_local_path).path_for_read(
+    return await get_storage().path_for_read(
         key=item.storage_key
     ), f"{item.certificate_number}.pdf"
 
 
 async def handover_document_download(
     db: AsyncSession, org: str, case_id: str, document_id: str
-) -> tuple[Path, str, str]:
+) -> tuple[StoredFile, str, str]:
     case = await _case(db, org, case_id)
     item = await _entity(db, HandoverDocument, org, document_id)
     possession = (
@@ -1694,7 +1717,7 @@ async def handover_document_download(
     ):
         raise _error("HANDOVER_DOCUMENT_MISSING", "Handover document is unavailable", 404)
     return (
-        await LocalStorage(get_settings().storage_local_path).path_for_read(key=item.storage_key),
+        await get_storage().path_for_read(key=item.storage_key),
         item.file_name,
         item.content_type,
     )

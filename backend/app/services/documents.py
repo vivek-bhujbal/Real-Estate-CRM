@@ -38,8 +38,13 @@ from app.schemas.documents import (
     DocumentView,
 )
 from app.schemas.organization import Page
+from app.security.malware import (
+    MalwareDetectedError,
+    MalwareScanUnavailableError,
+    scan_upload,
+)
 from app.services.organization import MutationContext
-from app.storage.local import LocalStorage
+from app.storage import StoredFile, get_storage
 
 ALLOWED_FILE_TYPES = {
     "application/pdf": {".pdf"},
@@ -98,6 +103,8 @@ def _audit(
         new_value=after,
         request_id=context.request_id,
         ip_address=context.ip_address,
+        user_agent=context.user_agent,
+        device_metadata=context.device_metadata,
         created_at=_now(),
     )
 
@@ -528,6 +535,18 @@ async def _prepare_file(upload: UploadFile) -> PreparedFile:
             "UNSUPPORTED_FILE_TYPE",
             "Only genuine PDF, JPEG, and PNG documents are accepted",
         )
+    try:
+        await scan_upload(path)
+    except MalwareDetectedError as exc:
+        await asyncio.to_thread(path.unlink, missing_ok=True)
+        raise AppError(422, "MALWARE_DETECTED", "The uploaded file failed security checks") from exc
+    except MalwareScanUnavailableError as exc:
+        await asyncio.to_thread(path.unlink, missing_ok=True)
+        raise AppError(
+            503,
+            "MALWARE_SCANNER_UNAVAILABLE",
+            "The upload could not be security-scanned; try again later",
+        ) from exc
     return PreparedFile(path, file_name, content_type, size, checksum.hexdigest())
 
 
@@ -546,7 +565,7 @@ async def _persist_upload(
     *,
     action: str,
 ) -> DocumentView:
-    storage = LocalStorage(get_settings().storage_local_path)
+    storage = get_storage()
     key = _storage_key(document)
     try:
         await storage.save(key=key, source=prepared.path)
@@ -806,11 +825,11 @@ async def prepare_download(
     organization_id: str,
     document_id: str,
     context: MutationContext,
-) -> tuple[Path, str, str]:
+) -> tuple[StoredFile, str, str]:
     document = await _entity(db, organization_id, document_id)
     if not document.storage_key or not document.file_name or not document.content_type:
         raise AppError(409, "DOCUMENT_NOT_UPLOADED", "This document does not have an uploaded file")
-    storage = LocalStorage(get_settings().storage_local_path)
+    storage = get_storage()
     try:
         path = await storage.path_for_read(key=document.storage_key)
     except FileNotFoundError as exc:

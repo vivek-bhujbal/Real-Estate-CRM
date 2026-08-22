@@ -1,3 +1,5 @@
+from urllib.parse import urlsplit
+
 from fastapi import APIRouter, BackgroundTasks, Depends, Request, Response
 
 from app.api.dependencies import CurrentUser, DbSession
@@ -36,7 +38,7 @@ def _set_refresh_cookie(response: Response, value: str) -> None:
         path=f"{settings.api_v1_prefix}/auth",
         secure=settings.secure_cookies,
         httponly=True,
-        samesite="lax",
+        samesite="strict",
     )
     _set_no_store(response)
 
@@ -48,7 +50,7 @@ def _clear_refresh_cookie(response: Response) -> None:
         path=f"{settings.api_v1_prefix}/auth",
         secure=settings.secure_cookies,
         httponly=True,
-        samesite="lax",
+        samesite="strict",
     )
     _set_no_store(response)
 
@@ -63,10 +65,16 @@ def _refresh_cookie(request: Request) -> str | None:
 
 
 def _validate_cookie_origin(request: Request) -> None:
+    if request.headers.get("sec-fetch-site", "").lower() == "cross-site":
+        raise AppError(status_code=403, code="ORIGIN_NOT_ALLOWED", message="Request rejected")
     origin = request.headers.get("origin")
-    if origin is not None and origin.rstrip("/") not in {
-        allowed.rstrip("/") for allowed in get_settings().cors_origins
-    }:
+    if origin is None:
+        referer = request.headers.get("referer")
+        if referer:
+            parsed = urlsplit(referer)
+            origin = f"{parsed.scheme}://{parsed.netloc}" if parsed.scheme and parsed.netloc else ""
+    allowed_origins = {allowed.rstrip("/") for allowed in get_settings().cors_origins}
+    if origin is not None and origin.rstrip("/") not in allowed_origins:
         raise AppError(status_code=403, code="ORIGIN_NOT_ALLOWED", message="Request rejected")
 
 

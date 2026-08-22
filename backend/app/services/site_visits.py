@@ -21,7 +21,7 @@ from app.models.entities import (
     Unit,
     User,
 )
-from app.models.enums import ActivityType, VisitStatus
+from app.models.enums import ActivityType, NotificationEventType, VisitStatus
 from app.schemas.organization import Page
 from app.schemas.site_visits import (
     CheckInPayload,
@@ -34,6 +34,7 @@ from app.schemas.site_visits import (
     SiteVisitView,
     VisitStatusPayload,
 )
+from app.services.notifications import queue_in_app
 from app.services.organization import MutationContext
 
 
@@ -103,6 +104,8 @@ def _audit(
         new_value=after,
         request_id=context.request_id,
         ip_address=context.ip_address,
+        user_agent=context.user_agent,
+        device_metadata=context.device_metadata,
         created_at=_now(),
     )
 
@@ -492,6 +495,19 @@ async def create_visit(
     await db.flush()
     await _replace_units(db, organization_id, visit, payload.interested_unit_ids)
     db.add(_audit(organization_id, context, "site_visit.created", visit.id, None, _snapshot(visit)))
+    if visit.assigned_user_id:
+        queue_in_app(
+            db,
+            organization_id=organization_id,
+            recipient_user_ids=[visit.assigned_user_id],
+            event_type=NotificationEventType.SITE_VISIT_SCHEDULED,
+            title="Site visit scheduled",
+            body=f"Visit scheduled for {visit.scheduled_at.isoformat()}",
+            related_entity_type="site_visit",
+            related_entity_id=visit.id,
+            action_url=f"/site-visits/{visit.id}",
+            data={"scheduled_at": visit.scheduled_at.isoformat(), "project_id": visit.project_id},
+        )
     await db.commit()
     await db.refresh(visit)
     return (await _views(db, organization_id, [visit]))[0]
@@ -565,6 +581,19 @@ async def update_visit(
     db.add(
         _audit(organization_id, context, "site_visit.updated", visit.id, before, _snapshot(visit))
     )
+    if visit.assigned_user_id:
+        queue_in_app(
+            db,
+            organization_id=organization_id,
+            recipient_user_ids=[visit.assigned_user_id],
+            event_type=NotificationEventType.SITE_VISIT_UPDATED,
+            title="Site visit updated",
+            body=f"Visit is scheduled for {visit.scheduled_at.isoformat()}",
+            related_entity_type="site_visit",
+            related_entity_id=visit.id,
+            action_url=f"/site-visits/{visit.id}",
+            data={"scheduled_at": visit.scheduled_at.isoformat(), "status": visit.status.value},
+        )
     await db.commit()
     await db.refresh(visit)
     return (await _views(db, organization_id, [visit]))[0]

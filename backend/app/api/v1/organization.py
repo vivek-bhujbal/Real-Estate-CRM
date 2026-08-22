@@ -1,9 +1,15 @@
+import csv
+import json
+from datetime import datetime
+from io import StringIO
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Query, Request, Response
 
-from app.api.dependencies import DbSession, SecurityContext, require_permissions
+from app.api.dependencies import DbSession, SecurityContext, mutation_context, require_permissions
+from app.core.responses import PRIVATE_FILE_HEADERS
 from app.schemas.organization import (
+    AuditFilterOptions,
     AuditLogView,
     BranchCreate,
     BranchUpdate,
@@ -53,6 +59,7 @@ TerritoriesCreator = Annotated[SecurityContext, Depends(require_permissions("ter
 TerritoriesUpdater = Annotated[SecurityContext, Depends(require_permissions("territories.update"))]
 TerritoriesDeleter = Annotated[SecurityContext, Depends(require_permissions("territories.delete"))]
 AuditReader = Annotated[SecurityContext, Depends(require_permissions("audit.view"))]
+AuditExporter = Annotated[SecurityContext, Depends(require_permissions("audit.export"))]
 
 SearchQuery = Annotated[str | None, Query(max_length=100)]
 PageQuery = Annotated[int, Query(ge=1, le=100_000)]
@@ -62,12 +69,7 @@ PageSizeQuery = Annotated[int, Query(ge=1, le=100)]
 def _mutation_context(
     request: Request, context: SecurityContext
 ) -> organization_service.MutationContext:
-    return organization_service.MutationContext(
-        actor_user_id=context.user.id,
-        permissions=context.permissions,
-        request_id=request.state.request_id,
-        ip_address=request.client.host if request.client else None,
-    )
+    return mutation_context(request, context)
 
 
 @router.get("", response_model=OrganizationManagementView)
@@ -365,6 +367,84 @@ async def delete_territory(
     )
 
 
+@router.get("/audit-logs/options", response_model=AuditFilterOptions)
+async def audit_log_options(db: DbSession, context: AuditReader) -> AuditFilterOptions:
+    return await organization_service.audit_filter_options(db, context.organization_id)
+
+
+@router.get("/audit-logs/export")
+async def export_audit_logs(
+    db: DbSession,
+    context: AuditExporter,
+    q: SearchQuery = None,
+    action: str | None = Query(default=None, max_length=100),
+    entity_type: str | None = Query(default=None, max_length=100),
+    actor_user_id: str | None = Query(default=None, max_length=36),
+    entity_id: str | None = Query(default=None, max_length=36),
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+) -> Response:
+    rows = await organization_service.audit_export_rows(
+        db,
+        context.organization_id,
+        q=q,
+        action=action,
+        entity_type=entity_type,
+        actor_user_id=actor_user_id,
+        entity_id=entity_id,
+        date_from=date_from,
+        date_to=date_to,
+    )
+    output = StringIO()
+    writer = csv.writer(output)
+    writer.writerow(
+        [
+            "timestamp",
+            "organization_id",
+            "organization",
+            "actor_user_id",
+            "actor",
+            "action",
+            "entity",
+            "entity_id",
+            "old_value",
+            "new_value",
+            "request_id",
+            "ip_address",
+            "user_agent",
+            "device_metadata",
+        ]
+    )
+    for row in rows:
+        writer.writerow(
+            [
+                row.created_at.isoformat(),
+                row.organization_id,
+                _safe_csv(row.organization_name),
+                row.actor_user_id,
+                _safe_csv(row.actor_name),
+                row.action,
+                row.entity_type,
+                row.entity_id,
+                json.dumps(row.old_value, sort_keys=True, default=str),
+                json.dumps(row.new_value, sort_keys=True, default=str),
+                row.request_id,
+                row.ip_address,
+                _safe_csv(row.user_agent),
+                json.dumps(row.device_metadata, sort_keys=True, default=str),
+            ]
+        )
+    return Response(
+        content=output.getvalue(),
+        media_type="text/csv; charset=utf-8",
+        headers={
+            **PRIVATE_FILE_HEADERS,
+            "Content-Disposition": 'attachment; filename="audit-log.csv"',
+            "Cache-Control": "no-store",
+        },
+    )
+
+
 @router.get("/audit-logs", response_model=Page[AuditLogView])
 async def audit_logs(
     db: DbSession,
@@ -372,6 +452,10 @@ async def audit_logs(
     q: SearchQuery = None,
     action: str | None = Query(default=None, max_length=100),
     entity_type: str | None = Query(default=None, max_length=100),
+    actor_user_id: str | None = Query(default=None, max_length=36),
+    entity_id: str | None = Query(default=None, max_length=36),
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
     page: PageQuery = 1,
     page_size: PageSizeQuery = 20,
 ) -> Page[AuditLogView]:
@@ -381,6 +465,16 @@ async def audit_logs(
         q=q,
         action=action,
         entity_type=entity_type,
+        actor_user_id=actor_user_id,
+        entity_id=entity_id,
+        date_from=date_from,
+        date_to=date_to,
         page=page,
         page_size=page_size,
     )
+
+
+def _safe_csv(value: str | None) -> str | None:
+    if value and value[0] in "=+-@":
+        return f"'{value}"
+    return value

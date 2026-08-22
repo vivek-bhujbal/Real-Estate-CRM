@@ -4,7 +4,6 @@ import uuid
 from datetime import UTC, date, datetime
 from decimal import ROUND_HALF_UP, Decimal
 from math import ceil
-from pathlib import Path
 from typing import Any
 
 from fastapi import UploadFile
@@ -12,7 +11,6 @@ from sqlalchemy import delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import get_settings
 from app.core.errors import AppError
 from app.models.entities import (
     AuditLog,
@@ -79,7 +77,7 @@ from app.schemas.partners import (
 )
 from app.services.documents import _prepare_file
 from app.services.organization import MutationContext
-from app.storage.local import LocalStorage
+from app.storage import StoredFile, get_storage
 
 ZERO = Decimal("0.00")
 MONEY = Decimal("0.01")
@@ -116,6 +114,8 @@ def _audit(
         new_value=after,
         request_id=context.request_id,
         ip_address=context.ip_address,
+        user_agent=context.user_agent,
+        device_metadata=context.device_metadata,
         created_at=_now(),
     )
 
@@ -931,7 +931,7 @@ async def upload_document(
         raise _error("DOCUMENT_NOT_UPLOADABLE", "Document is not awaiting an upload")
     prepared = await _prepare_file(upload)
     key = f"pd/{org}/{item.id}/{uuid.uuid4().hex[:16]}.private"
-    storage = LocalStorage(get_settings().storage_local_path)
+    storage = get_storage()
     try:
         await storage.save(key=key, source=prepared.path)
         old_key = item.storage_key
@@ -1120,7 +1120,7 @@ async def upload_signed_agreement(
             await asyncio.to_thread(prepared.path.unlink)
         raise _error("AGREEMENT_PDF_REQUIRED", "Signed agreement must be a PDF", 415)
     key = f"pa/{org}/{item.id}/{uuid.uuid4().hex[:16]}.private"
-    storage = LocalStorage(get_settings().storage_local_path)
+    storage = get_storage()
     try:
         await storage.save(key=key, source=prepared.path)
         item.storage_key = key
@@ -1786,21 +1786,21 @@ async def decide_dispute(
 
 async def prepare_document_download(
     db: AsyncSession, org: str, document_id: str
-) -> tuple[Path, str, str]:
+) -> tuple[StoredFile, str, str]:
     item = await _entity(db, PartnerDocument, org, document_id)
     if not item.storage_key or not item.file_name or not item.content_type:
         raise _error("DOCUMENT_NOT_UPLOADED", "Partner document is unavailable", 404)
-    path = await LocalStorage(get_settings().storage_local_path).path_for_read(key=item.storage_key)
+    path = await get_storage().path_for_read(key=item.storage_key)
     return path, item.file_name, item.content_type
 
 
 async def prepare_agreement_download(
     db: AsyncSession, org: str, agreement_id: str
-) -> tuple[Path, str]:
+) -> tuple[StoredFile, str]:
     item = await _entity(db, PartnerAgreement, org, agreement_id)
     if not item.storage_key or not item.file_name:
         raise _error("AGREEMENT_NOT_UPLOADED", "Signed agreement is unavailable", 404)
-    path = await LocalStorage(get_settings().storage_local_path).path_for_read(key=item.storage_key)
+    path = await get_storage().path_for_read(key=item.storage_key)
     return path, item.file_name
 
 

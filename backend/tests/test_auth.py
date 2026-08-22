@@ -77,6 +77,12 @@ async def test_cookie_authenticated_routes_reject_untrusted_origins(client: Asyn
     assert rejected.status_code == 403
     assert rejected.json()["error"]["code"] == "ORIGIN_NOT_ALLOWED"
 
+    fetch_metadata_rejected = await client.post(
+        "/api/v1/auth/refresh", headers={"Sec-Fetch-Site": "cross-site"}
+    )
+    assert fetch_metadata_rejected.status_code == 403
+    assert fetch_metadata_rejected.json()["error"]["code"] == "ORIGIN_NOT_ALLOWED"
+
 
 async def test_duplicate_organization_is_rejected(client: AsyncClient) -> None:
     assert (

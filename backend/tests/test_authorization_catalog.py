@@ -47,3 +47,18 @@ def test_administrator_has_every_permission_and_manage_implies_module_actions() 
     assert administrator.permissions == ALL_PERMISSIONS
     assert permission_is_granted({"leads.manage"}, "leads.delete")
     assert not permission_is_granted({"leads.manage"}, "payments.view")
+
+
+def test_auditor_template_has_only_read_and_export_permissions() -> None:
+    auditor = next(role for role in ROLE_TEMPLATES if role.name == "Auditor / Compliance User")
+    assert auditor.permissions
+    assert all(code.endswith((".view", ".export")) for code in auditor.permissions)
+    assert "audit.view" in auditor.permissions
+    assert "audit.export" in auditor.permissions
+    assert "audit.manage" not in auditor.permissions
+
+
+def test_operational_roles_can_read_and_acknowledge_in_app_notifications() -> None:
+    for role in ROLE_TEMPLATES[:-1]:
+        assert "notifications.view" in role.permissions
+        assert "notifications.update" in role.permissions

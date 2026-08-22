@@ -1,19 +1,23 @@
 import logging
+import secrets
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from redis.asyncio import Redis
 from sqlalchemy import text
 
 from app.api.v1.router import api_router
 from app.core.config import get_settings
 from app.core.errors import AppError, app_error_handler
+from app.core.logging import configure_logging
 from app.core.middleware import RequestContextMiddleware
 from app.db.session import engine
 
+configure_logging()
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
@@ -21,7 +25,10 @@ settings = get_settings()
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.redis = Redis.from_url(settings.redis_url, decode_responses=True)
-    settings.storage_local_path.mkdir(parents=True, exist_ok=True)
+    if settings.storage_backend == "local":
+        settings.storage_local_path.mkdir(parents=True, exist_ok=True)
+    else:
+        settings.storage_temp_path.mkdir(parents=True, exist_ok=True)
     yield
     await app.state.redis.aclose()
     await engine.dispose()
@@ -85,6 +92,19 @@ async def ready(request: Request) -> JSONResponse:
         status_code=200 if healthy else 503,
         content={"status": "ok" if healthy else "degraded", "checks": checks},
     )
+
+
+@app.get("/metrics", include_in_schema=False)
+async def metrics(request: Request) -> Response:
+    if not settings.metrics_enabled:
+        return Response(status_code=404)
+    configured = settings.metrics_bearer_token
+    if configured is not None:
+        supplied = request.headers.get("Authorization", "")
+        expected = f"Bearer {configured.get_secret_value()}"
+        if not secrets.compare_digest(supplied, expected):
+            return Response(status_code=401, headers={"WWW-Authenticate": "Bearer"})
+    return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
 app.include_router(api_router, prefix=settings.api_v1_prefix)

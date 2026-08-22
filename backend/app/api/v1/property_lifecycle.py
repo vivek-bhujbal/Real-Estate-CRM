@@ -3,7 +3,8 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, File, Query, Request, UploadFile
 from fastapi.responses import FileResponse
 
-from app.api.dependencies import DbSession, SecurityContext, require_permissions
+from app.api.dependencies import DbSession, SecurityContext, mutation_context, require_permissions
+from app.core.responses import private_file_response
 from app.models.enums import PostBookingStage
 from app.schemas.organization import Page
 from app.schemas.property_lifecycle import (
@@ -69,12 +70,7 @@ DocumentWriter = Annotated[
 
 
 def _context(request: Request, security: SecurityContext) -> MutationContext:
-    return MutationContext(
-        actor_user_id=security.user.id,
-        permissions=security.permissions,
-        request_id=request.state.request_id,
-        ip_address=request.client.host if request.client else None,
-    )
+    return mutation_context(request, security)
 
 
 @router.get("/stats", response_model=LifecycleStats)
@@ -164,7 +160,7 @@ async def download_agreement(case_id: str, db: DbSession, context: Reader) -> Fi
     path, filename, content_type = await service.agreement_download(
         db, context.organization_id, case_id
     )
-    return FileResponse(path, media_type=content_type, filename=filename)
+    return private_file_response(path, filename=filename, media_type=content_type)
 
 
 @router.post("/{case_id}/construction", response_model=CaseDetail, status_code=201)
@@ -221,7 +217,7 @@ async def no_dues(
 @router.get("/{case_id}/no-dues/download")
 async def download_no_dues(case_id: str, db: DbSession, context: Reader) -> FileResponse:
     path, filename = await service.no_dues_download(db, context.organization_id, case_id)
-    return FileResponse(path, media_type="application/pdf", filename=filename)
+    return private_file_response(path, filename=filename, media_type="application/pdf")
 
 
 @router.post("/{case_id}/snags", response_model=CaseDetail, status_code=201)
@@ -339,7 +335,7 @@ async def download_handover_document(
     path, filename, content_type = await service.handover_document_download(
         db, context.organization_id, case_id, document_id
     )
-    return FileResponse(path, media_type=content_type, filename=filename)
+    return private_file_response(path, filename=filename, media_type=content_type)
 
 
 @router.post("/{case_id}/handover/acknowledge", response_model=CaseDetail)

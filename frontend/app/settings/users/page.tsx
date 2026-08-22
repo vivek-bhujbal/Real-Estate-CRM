@@ -4,6 +4,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 
 import { AppShell } from "@/components/app-shell";
 import { useAuth } from "@/components/auth-provider";
+import { useConfirmDialog } from "@/components/confirm-dialog";
 import { SettingsNavigation } from "@/components/settings-navigation";
 import {
   apiRequest,
@@ -39,6 +40,7 @@ function errorMessage(reason: unknown): string {
 
 export default function UsersPage() {
   const { session } = useAuth();
+  const confirmDialog = useConfirmDialog();
   const permissions = useMemo(() => session?.user.permissions ?? [], [session]);
   const [result, setResult] = useState<PageResponse<ManagedUser> | null>(null);
   const [branches, setBranches] = useState<Branch[]>([]);
@@ -162,7 +164,7 @@ export default function UsersPage() {
   }
 
   async function deactivate(user: ManagedUser) {
-    if (!canDelete || !window.confirm(`Deactivate ${user.full_name}? Their active sessions will be revoked.`)) return;
+    if (!canDelete || !(await confirmDialog({ title: "Deactivate user?", message: `${user.full_name} will lose access and all active sessions will be revoked.`, confirmLabel: "Deactivate", tone: "danger" }))) return;
     setError(null);
     setNotice(null);
     try {

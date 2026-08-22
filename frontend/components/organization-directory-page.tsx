@@ -4,6 +4,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 
 import { AppShell } from "@/components/app-shell";
 import { useAuth } from "@/components/auth-provider";
+import { useConfirmDialog } from "@/components/confirm-dialog";
 import { SettingsNavigation } from "@/components/settings-navigation";
 import {
   apiRequest,
@@ -48,6 +49,7 @@ function message(reason: unknown) {
 
 export function OrganizationDirectoryPage({ kind }: { kind: EntityKind }) {
   const { session } = useAuth();
+  const confirmDialog = useConfirmDialog();
   const permissions = session?.user.permissions ?? [];
   const settings = config[kind];
   const [result, setResult] = useState<PageResponse<DirectoryEntity> | null>(null);
@@ -167,7 +169,7 @@ export function OrganizationDirectoryPage({ kind }: { kind: EntityKind }) {
   }
 
   async function remove(entity: DirectoryEntity) {
-    if (!canDelete || !window.confirm(`Delete ${entity.name}?`)) return;
+    if (!canDelete || !(await confirmDialog({ title: `Delete ${settings.singular}?`, message: `${entity.name} will be permanently removed if it is not referenced by other records.`, confirmLabel: "Delete", tone: "danger" }))) return;
     setError(null);
     try {
       await apiRequest<void>(`/organization/${kind}/${entity.id}`, { method: "DELETE" });

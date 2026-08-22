@@ -2,7 +2,13 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Request
 
-from app.api.dependencies import DbSession, SecurityContext, require_permissions
+from app.api.dependencies import (
+    DbSession,
+    SecurityContext,
+    mutation_context,
+    require_permission_groups,
+    require_permissions,
+)
 from app.models.enums import BookingStatus
 from app.schemas.bookings import (
     BookingAdvance,
@@ -35,7 +41,11 @@ BookingUpdater = Annotated[SecurityContext, Depends(require_permissions("booking
 BookingApprover = Annotated[SecurityContext, Depends(require_permissions("bookings.approve"))]
 PaymentCreator = Annotated[
     SecurityContext,
-    Depends(require_permissions("payments.create", "bookings.update", any_of=True)),
+    Depends(
+        require_permission_groups(
+            ("bookings.view",), ("payments.create", "bookings.update")
+        )
+    ),
 ]
 PaymentApprover = Annotated[
     SecurityContext,
@@ -48,12 +58,7 @@ FinancingUpdater = Annotated[
 
 
 def _context(request: Request, security: SecurityContext) -> MutationContext:
-    return MutationContext(
-        actor_user_id=security.user.id,
-        permissions=security.permissions,
-        request_id=request.state.request_id,
-        ip_address=request.client.host if request.client else None,
-    )
+    return mutation_context(request, security)
 
 
 @router.get("", response_model=Page[BookingView])

@@ -6,6 +6,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 
 import { AppShell } from "@/components/app-shell";
 import { useAuth } from "@/components/auth-provider";
+import { useConfirmDialog } from "@/components/confirm-dialog";
 import { apiRequest, ApiError, permissionGranted, SalespersonOption, SiteVisit } from "@/lib/api";
 
 function message(reason: unknown) { return reason instanceof ApiError ? reason.message : "Site visit is unavailable"; }
@@ -13,7 +14,7 @@ function dateTime(value: string | null) { return value ? new Date(value).toLocal
 function localInput(value: string) { const date = new Date(value); const shifted = new Date(date.getTime() - date.getTimezoneOffset() * 60000); return shifted.toISOString().slice(0, 16); }
 
 export default function SiteVisitDetailPage() {
-  const { id } = useParams<{ id: string }>(); const router = useRouter(); const { session } = useAuth(); const permissions = useMemo(() => session?.user.permissions ?? [], [session]);
+  const { id } = useParams<{ id: string }>(); const router = useRouter(); const { session } = useAuth(); const confirmDialog = useConfirmDialog(); const permissions = useMemo(() => session?.user.permissions ?? [], [session]);
   const [visit, setVisit] = useState<SiteVisit | null>(null); const [salespeople, setSalespeople] = useState<SalespersonOption[]>([]); const [refresh, setRefresh] = useState(0); const [error, setError] = useState<string | null>(null); const [notice, setNotice] = useState<string | null>(null); const [saving, setSaving] = useState(false); const [mode, setMode] = useState<"edit" | "checkin" | "checkout" | null>(null);
   const [edit, setEdit] = useState({ scheduled_at: "", assigned_user_id: "", attendees: "", notes: "" }); const [checkout, setCheckout] = useState({ feedback: "", outcome: "", next_follow_up_at: "" });
   const canUpdate = permissionGranted(permissions, "visits.update"); const canDelete = permissionGranted(permissions, "visits.delete"); const canAssign = permissionGranted(permissions, "visits.assign");
@@ -25,7 +26,7 @@ export default function SiteVisitDetailPage() {
   async function changeStatus(status: "CONFIRMED" | "CANCELLED" | "NO_SHOW") { const reason = status === "CANCELLED" ? window.prompt("Cancellation reason (optional)") : null; if (status === "CANCELLED" && reason === null) return; await action("status", { status, reason }, `Visit marked ${status.replaceAll("_", " ").toLowerCase()}`); }
   async function saveEdit(event: FormEvent) { event.preventDefault(); setSaving(true); setError(null); try { await apiRequest(`/site-visits/${id}`, { method: "PATCH", body: JSON.stringify({ scheduled_at: new Date(edit.scheduled_at).toISOString(), assigned_user_id: edit.assigned_user_id || null, attendees: edit.attendees.split(",").map((item) => item.trim()).filter(Boolean), notes: edit.notes || null }) }); setMode(null); setNotice("Visit details updated"); setRefresh((value) => value + 1); } catch (reason) { setError(message(reason)); } finally { setSaving(false); } }
   async function submitCheckout(event: FormEvent) { event.preventDefault(); await action("check-out", { feedback: checkout.feedback || null, outcome: checkout.outcome, next_follow_up_at: checkout.next_follow_up_at ? new Date(checkout.next_follow_up_at).toISOString() : null }, "Visit completed and timelines updated"); }
-  async function remove() { if (!confirm("Delete this site visit?")) return; try { await apiRequest(`/site-visits/${id}`, { method: "DELETE" }); router.push("/site-visits"); } catch (reason) { setError(message(reason)); } }
+  async function remove() { if (!(await confirmDialog({ title: "Delete site visit?", message: "The scheduled visit and its recorded context will be permanently removed.", confirmLabel: "Delete visit", tone: "danger" }))) return; try { await apiRequest(`/site-visits/${id}`, { method: "DELETE" }); router.push("/site-visits"); } catch (reason) { setError(message(reason)); } }
 
   if (!visit) return <AppShell><main className="dashboard-content"><div className="center-inline"><span className="spinner" />Loading site visit...</div>{error && <div className="alert alert-error">{error}</div>}</main></AppShell>;
   const editable = ["SCHEDULED", "CONFIRMED"].includes(visit.status);

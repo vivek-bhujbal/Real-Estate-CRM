@@ -6,6 +6,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 
 import { AppShell } from "@/components/app-shell";
 import { useAuth } from "@/components/auth-provider";
+import { useConfirmDialog } from "@/components/confirm-dialog";
 import {
   ActivityType, apiDownload, apiRequest, ApiError, Customer, Customer360, CustomerActivity,
   CustomerSalesRecord, CustomerStatus, permissionGranted
@@ -46,6 +47,7 @@ function editDraft(customer: Customer): EditDraft {
 
 export default function CustomerProfilePage() {
   const { id } = useParams<{ id: string }>();
+  const confirmDialog = useConfirmDialog();
   const router = useRouter();
   const { session } = useAuth();
   const permissions = useMemo(() => session?.user.permissions ?? [], [session]);
@@ -95,7 +97,7 @@ export default function CustomerProfilePage() {
   }
 
   async function removeCustomer() {
-    if (!confirm("Delete this customer? Linked transactional records will prevent deletion.")) return;
+    if (!(await confirmDialog({ title: "Delete customer?", message: "This customer will be permanently removed. Linked transactional records may prevent deletion.", confirmLabel: "Delete customer", tone: "danger" }))) return;
     try { await apiRequest<void>(`/customers/${id}`, { method: "DELETE" }); router.push("/customers"); }
     catch (reason) { setError(message(reason)); }
   }
@@ -110,7 +112,7 @@ export default function CustomerProfilePage() {
   }
 
   async function removeActivity(activityId: string) {
-    if (!confirm("Delete this activity?")) return;
+    if (!(await confirmDialog({ title: "Delete activity?", message: "This customer timeline entry will be permanently removed.", confirmLabel: "Delete activity", tone: "danger" }))) return;
     try { await apiRequest<void>(`/customers/${id}/activities/${activityId}`, { method: "DELETE" }); setRefresh((value) => value + 1); }
     catch (reason) { setError(message(reason)); }
   }

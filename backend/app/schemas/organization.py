@@ -323,13 +323,29 @@ class TerritoryView(TerritoryCreate):
 
 class AuditLogView(BaseModel):
     id: str
+    organization_id: str
+    organization_name: str
     actor_user_id: str | None
     actor_name: str | None = None
     action: str
     entity_type: str
     entity_id: str
+    old_value: dict[str, Any] | None
     previous_value: dict[str, Any] | None
     new_value: dict[str, Any] | None
     request_id: str | None
     ip_address: str | None
+    user_agent: str | None
+    device_metadata: dict[str, Any] | None
     created_at: datetime
+
+
+class AuditActorOption(BaseModel):
+    id: str
+    name: str
+
+
+class AuditFilterOptions(BaseModel):
+    actions: list[str]
+    entity_types: list[str]
+    actors: list[AuditActorOption]

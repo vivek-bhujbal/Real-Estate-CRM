@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from typing import Annotated, Any
 
 import jwt
-from fastapi import Depends
+from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,7 +14,8 @@ from app.core.errors import AppError
 from app.core.security import decode_access_token
 from app.db.session import get_db
 from app.models.entities import User
-from app.services.auth import permission_codes, session_is_active
+from app.services.auth import effective_permission_codes, session_is_active
+from app.services.organization import MutationContext
 
 DbSession = Annotated[AsyncSession, Depends(get_db)]
 bearer = HTTPBearer(auto_error=False)
@@ -97,7 +98,9 @@ class SecurityContext:
 
 
 async def get_security_context(db: DbSession, user: CurrentUser) -> SecurityContext:
-    return SecurityContext(user=user, permissions=frozenset(await permission_codes(db, user)))
+    return SecurityContext(
+        user=user, permissions=frozenset(await effective_permission_codes(db, user))
+    )
 
 
 CurrentSecurityContext = Annotated[SecurityContext, Depends(get_security_context)]
@@ -107,7 +110,7 @@ def require_permission(
     permission: str,
 ) -> Callable[[DbSession, CurrentUser], Coroutine[Any, Any, User]]:
     async def dependency(db: DbSession, user: CurrentUser) -> User:
-        if not permission_is_granted(set(await permission_codes(db, user)), permission):
+        if not permission_is_granted(set(await effective_permission_codes(db, user)), permission):
             raise AppError(
                 status_code=403,
                 code="PERMISSION_DENIED",
@@ -138,6 +141,30 @@ def require_permissions(
     return dependency
 
 
+def require_permission_groups(
+    *groups: tuple[str, ...],
+) -> Callable[[CurrentSecurityContext], Coroutine[Any, Any, SecurityContext]]:
+    """Require at least one permission from every supplied group.
+
+    This supports boundaries such as ``bookings.view`` AND either
+    ``payments.create`` or ``bookings.update`` without weakening them into one
+    large any-of check.
+    """
+    if not groups or any(not group for group in groups):
+        raise ValueError("At least one non-empty permission group is required")
+
+    async def dependency(context: CurrentSecurityContext) -> SecurityContext:
+        if not all(any(context.has_permission(code) for code in group) for group in groups):
+            raise AppError(
+                status_code=403,
+                code="PERMISSION_DENIED",
+                message="You do not have permission to perform this action",
+            )
+        return context
+
+    return dependency
+
+
 def enforce_organization_scope(context: SecurityContext, organization_id: str) -> None:
     if context.organization_id != organization_id:
         raise AppError(
@@ -145,3 +172,25 @@ def enforce_organization_scope(context: SecurityContext, organization_id: str) -
             code="RESOURCE_NOT_FOUND",
             message="The requested resource was not found",
         )
+
+
+def mutation_context(request: Request, context: SecurityContext) -> MutationContext:
+    """Build the shared audit context used by every authenticated mutation."""
+    user_agent = request.headers.get("user-agent")
+    device_metadata = {
+        key: value
+        for key, value in {
+            "browser_brand": request.headers.get("sec-ch-ua"),
+            "platform": request.headers.get("sec-ch-ua-platform"),
+            "mobile": request.headers.get("sec-ch-ua-mobile"),
+        }.items()
+        if value
+    }
+    return MutationContext(
+        actor_user_id=context.user.id,
+        permissions=context.permissions,
+        request_id=getattr(request.state, "request_id", None),
+        ip_address=request.client.host if request.client else None,
+        user_agent=user_agent[:512] if user_agent else None,
+        device_metadata=device_metadata or None,
+    )
